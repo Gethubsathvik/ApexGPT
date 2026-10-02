@@ -1,0 +1,59 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Trained weights and checkpoints (large binaries)
+models/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.npy
+*.npz
+
+# Downloaded and tokenized datasets
+data/
+*.txt.gz
+corpus*.txt
+wiki_corpus.txt
+
+# Logs and runtime output
+*.log
+data_prep.log
+train.log
+logs/
+runs/
+out/
+
+# Generated plots
+loss_curves.png
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Kilo
+.kilo/
+
+# Environment overrides
+.env
+.env.*
