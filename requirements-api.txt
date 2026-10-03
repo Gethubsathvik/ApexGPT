@@ -1,0 +1,10 @@
+# Optional HTTP inference service.
+#
+# Install with:  pip install -r requirements-api.txt
+#
+# Only needed for `python -m tinyllm serve`. Training, the CLI and the desktop
+# GUI do not import any of this.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
+httpx>=0.27        # required by the API test suite

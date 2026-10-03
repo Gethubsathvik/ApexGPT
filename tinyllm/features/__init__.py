@@ -1,0 +1,1 @@
+"""Feature slices. Each is a vertical: service (logic) + view (cli/gui/api)."""

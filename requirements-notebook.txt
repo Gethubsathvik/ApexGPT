@@ -1,0 +1,11 @@
+# Optional Jupyter Lab front end.
+#
+# Install with:  python -m tinyllm lab --install
+#          or:   pip install -r requirements-notebook.txt
+#
+# Only needed for `python -m tinyllm lab` and the notebooks in notebooks/.
+# Training, the CLI, the desktop GUI and the HTTP API do not import any of this.
+jupyterlab>=4.0
+ipykernel>=6.29
+notebook>=7.0
+nbformat>=5.9            # notebook validation in tests/test_lab.py

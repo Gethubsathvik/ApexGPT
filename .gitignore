@@ -34,6 +34,7 @@ wiki_corpus.txt
 
 # Logs and runtime output
 *.log
+*.err
 data_prep.log
 train.log
 logs/
@@ -50,6 +51,10 @@ loss_curves.png
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
+.ipynb_checkpoints
 
 # Kilo
 .kilo/

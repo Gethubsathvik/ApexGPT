@@ -1,8 +1,45 @@
-torch==2.14.1+cpu
-transformers==5.18.0
-datasets==5.0.1
-tokenizers==0.23.2
-numpy==2.5.3
-matplotlib==3.11.2
-tqdm==4.70.1
-requests==2.34.2
+# Core training and inference dependencies
+#
+# IMPORTANT - torch is intentionally NOT pinned here.
+# The right PyTorch build depends on your hardware and OS (CUDA version, ROCm,
+# Intel XPU, Apple Metal, or plain CPU), and a single pin cannot serve all of
+# them. Install torch FIRST using the helper, then install this file:
+#
+#     python -m tinyllm setup --install        # detects the backend for you
+#
+# That installs the matching wheel (e.g. the cu124 index on an NVIDIA box) and
+# then runs `pip install -r requirements.txt` for everything below. If you
+# prefer to do it by hand, install torch from the index for your hardware:
+#
+#     NVIDIA CUDA 12.4 : pip install torch --index-url https://download.pytorch.org/whl/cu124
+#     NVIDIA CUDA 12.1 : pip install torch --index-url https://download.pytorch.org/whl/cu121
+#     AMD ROCm         : pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
+#     Intel XPU        : pip install torch --index-url https://download.pytorch.org/whl/xpu
+#     CPU only         : pip install torch --index-url https://download.pytorch.org/whl/cpu
+#     Apple Silicon    : pip install torch          (Metal ships in the default wheel)
+#     AMD/Intel (Win)  : pip install torch-directml (optional; then --device dml)
+#     any of the above : python -m tinyllm setup --install    picks it for you
+#
+# `python -m tinyllm env` reports which of these this machine can actually use.
+#
+# Python 3.10-3.12 has the widest wheel coverage; 3.13/3.14 work but may not have
+# an accelerator build for every platform yet.
+torch>=2.4
+
+# Tokenization and datasets
+transformers>=4.44
+tokenizers>=0.19
+datasets>=2.20
+huggingface-hub>=0.24
+pyarrow>=15.0
+
+# Numerics, plotting, CLI output
+numpy>=1.26
+matplotlib>=3.8
+tqdm>=4.66
+requests>=2.31
+
+# Testing
+pytest>=8.0
+
+# For the HTTP API, see requirements-api.txt
