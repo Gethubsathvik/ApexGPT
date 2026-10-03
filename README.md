@@ -1493,6 +1493,40 @@ ids and says so, rather than inventing a frequency.
 
 Optional, and the one part of ApexGPT that runs as its own process.
 
+### The one-line command
+
+```bash
+python -m apexgpt serve
+```
+
+That is the whole thing: it binds **http://127.0.0.1:8000** (the defaults) and
+finds the most recent real checkpoint on its own, loading the tokenizer that
+checkpoint recorded. Written out in full — the same thing, with the defaults
+spelled out:
+
+```bash
+python -m apexgpt serve --host 127.0.0.1 --port 8000
+```
+
+`--host`, `--port`, `--checkpoint` and `--device` only override what it would
+have picked. Bind `0.0.0.0` instead of `127.0.0.1` to let other machines on your
+network reach it. Check it is alive with:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+```json
+{"status":"ok","model":{"checkpoint":"models/runs/gpt-shakespeare-char/checkpoint.pt",
+ "parameters_m":10.8,"block_size":192,"vocab_size":257,"tokenizer":"char",
+ "step":400,"val_loss":2.461369639635086,"device":"cpu"}}
+```
+
+Interactive API docs, including every field of every request, are at
+**http://127.0.0.1:8000/docs**.
+
+### Everything else
+
 ```bash
 pip install -r requirements-api.txt
 python -m apexgpt serve --host 0.0.0.0 --port 8000
@@ -1507,6 +1541,10 @@ python -m apexgpt serve --host 0.0.0.0 --port 8000
 | `/v1/completions` | POST | OpenAI-compatible alias for third-party clients |
 | `/v1/models` | GET | model discovery, which OpenAI clients probe first |
 | `/docs` | GET | interactive OpenAPI docs |
+
+> `/predict` takes the same request body as generation, so the number of
+> candidates is **`top_k`** — not `k`. An unrecognised field is ignored, so
+> `{"prompt": "…", "k": 5}` quietly returns all 50 rows instead of 5.
 
 ```bash
 curl http://localhost:8000/health
