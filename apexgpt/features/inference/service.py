@@ -122,6 +122,10 @@ class InferenceEngine:
     payload: dict = field(default_factory=dict)
     tokenizer: object | None = None
     tokenizer_kind: str | None = None
+    # corpus token counts, built once and keyed by (path, size, mtime)
+    _inventory: object | None = field(default=None, repr=False)
+    _inventory_key: tuple | None = field(default=None, repr=False)
+    _inventory_note: str = field(default="", repr=False)
 
     def load(self, checkpoint: str | Path | None = None) -> "InferenceEngine":
         torch_device = get_device(self.device)
@@ -249,6 +253,117 @@ class InferenceEngine:
         """The single most likely next piece of text - the next word."""
         best = self.predict_next(prompt, top_k=1, temperature=temperature)
         return best[0].text if best else ""
+
+    # ------------------------------------------------------------------ tokens
+    def corpus_path(self) -> Path | None:
+        """The text this checkpoint was trained on, if it is still on disk.
+
+        The checkpoint records the dataset it was built from, so the token values
+        shown next to a prompt are the ones that model actually saw - and the
+        same ones ``apexgpt data tokens`` prints.
+        """
+        extra = self.payload.get("extra") or {}
+        key = ((extra.get("config") or {}).get("data") or {}).get("dataset")
+        if not key:
+            return None
+        try:
+            from ...core.config import DataConfig
+
+            cfg = DataConfig()
+            cfg.select_dataset(str(key))
+        except Exception:
+            return None
+        path = Path(cfg.corpus_path)
+        return path if path.exists() else None
+
+    def inventory(self, progress=None):
+        """Corpus token counts, built once and cached on the engine.
+
+        Counting a corpus is a full pass over the text, which is fine for tiny
+        Shakespeare and far too slow for Wikipedia to repeat on every keystroke.
+        The result is keyed by path, size and modification time, so rebuilding a
+        corpus invalidates it, and callers can poll :attr:`inventory_ready`
+        instead of blocking on it.
+        """
+        path = self.corpus_path()
+        if path is None:
+            self._inventory = None
+            self._inventory_key = None
+            self._inventory_note = "no corpus for this checkpoint"
+            return None
+        stat = path.stat()
+        key = (str(path), stat.st_size, int(stat.st_mtime))
+        if self._inventory_key == key:
+            return self._inventory
+        if progress is not None:
+            progress(f"counting the token values in {path.name} "
+                     f"({stat.st_size / 1e6:.1f} MB)...")
+        from ..data.service import build_inventory
+
+        self._inventory = build_inventory(path, self.tokenizer)
+        self._inventory_key = key
+        self._inventory_note = (f"{path.name}: {self._inventory.total:,} tokens, "
+                                f"{self._inventory.distinct:,} distinct ids")
+        return self._inventory
+
+    @property
+    def inventory_ready(self) -> bool:
+        """Whether the cached inventory still matches the corpus on disk."""
+        if self._inventory is None or self._inventory_key is None:
+            return False
+        path = self.corpus_path()
+        if path is None or not path.exists():
+            return False
+        stat = path.stat()
+        return self._inventory_key == (str(path), stat.st_size, int(stat.st_mtime))
+
+    @property
+    def inventory_note(self) -> str:
+        return self._inventory_note
+
+    def token_values(self, prompt: str, top_k: int = 5, temperature: float = 1.0,
+                     with_predictions: bool = True) -> dict:
+        """What the prompt costs in ids, and what the model expects next.
+
+        One call, because a text bar wants both halves at once: the ids the
+        prompt turns into (with their corpus frequency and share) and the ranked
+        next-token candidates. Everything here is already computed - ids and
+        counts from :meth:`inventory`, probabilities from the forward pass - so
+        this is cheap enough to run on every edit.
+        """
+        from ..data.service import TokenValue
+
+        tokenizer = self.tokenizer
+        ids = [int(i) for i in
+               tokenizer(prompt, add_special_tokens=False)["input_ids"]]
+        inventory = self.inventory()
+        # With no corpus on disk the ids still stand; only the frequency is
+        # missing, and saying so is better than showing a fabricated 0.000%
+        rows = (inventory.values_for(ids, tokenizer) if inventory is not None
+                else [TokenValue(i, tokenizer.decode([i])) for i in ids])
+
+        report = {
+            "text": prompt,
+            "token_ids": ids,
+            "tokens": [row.as_dict() for row in rows],
+            "corpus": {
+                "path": str(inventory.path) if inventory else None,
+                "tokens": inventory.total if inventory else 0,
+                "distinct": inventory.distinct if inventory else 0,
+                "ready": self.inventory_ready,
+            },
+            "entropy": None,
+            "predictions": [],
+        }
+        if with_predictions and prompt.strip() and self.model is not None:
+            predictions, entropy = self.predict_next_with_entropy(
+                prompt, top_k=top_k, temperature=temperature)
+            report["entropy"] = entropy
+            # the label is added here because the HTTP payload must stay
+            # OpenAI-shaped, while a text bar needs readable text
+            report["predictions"] = [{**p.as_dict(), "label": p.label}
+                                     for p in predictions]
+        return report
 
     def stream(self, req: GenerationRequest):
         """Yield decoded text incrementally, one token at a time."""

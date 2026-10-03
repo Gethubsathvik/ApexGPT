@@ -12,6 +12,7 @@ import math
 import queue
 import sys
 import threading
+from pathlib import Path
 
 import tkinter as tk
 from tkinter import ttk
@@ -30,6 +31,44 @@ INPUT_BG = "#313244"
 OUTPUT_BG = "#11111b"
 
 
+def format_token_values(report: dict, max_rows: int = 12) -> str:
+    """Render the token table and the next-word ranking for the text bar.
+
+    A pure function of the report, so the formatting can be checked without a
+    window and so every view prints the same numbers.
+    """
+    corpus = report.get("corpus") or {}
+    ids = report.get("token_ids") or []
+    rows = report.get("tokens") or []
+    has_counts = bool(corpus.get("path"))
+
+    if has_counts:
+        header = (f"{len(ids)} id(s)  |  {Path(corpus['path']).name}: "
+                  f"{corpus['tokens']:,} tokens, {corpus['distinct']:,} distinct"
+                  + ("" if corpus.get("ready", True) else "  (counting)"))
+    else:
+        header = f"{len(ids)} id(s)  |  no corpus on disk: ids only"
+
+    lines = [header]
+    for row in rows[:max_rows]:
+        if has_counts:
+            lines.append(f"  {row['token_id']:>6}  {row['label']:<16} "
+                         f"{row['count']:>9,}  {row['share'] * 100:>6.3f}%")
+        else:
+            lines.append(f"  {row['token_id']:>6}  {row['label']}")
+    if len(rows) > max_rows:
+        lines.append(f"  ... {len(rows) - max_rows} more id(s)")
+
+    predictions = report.get("predictions") or []
+    if predictions:
+        ranked = "  ".join(f"{p['label']} {p['probability']:.1%}"
+                           for p in predictions[:5])
+        entropy = report.get("entropy")
+        suffix = f"   entropy {entropy:.2f} nats" if entropy is not None else ""
+        lines.append(f"next:  {ranked}{suffix}")
+    return "\n".join(lines) + "\n"
+
+
 class ApexGPTApp:
     """Main window. All generation happens on a worker thread."""
 
@@ -39,18 +78,24 @@ class ApexGPTApp:
         self.events: queue.Queue = queue.Queue()
         self.stop_flag = threading.Event()
         self.thread: threading.Thread | None = None
+        self.token_thread: threading.Thread | None = None
+        self.token_after: str | None = None
+        self._tokens_wanted = ""
+        self._tokens_done = ""
 
         self._build()
         self._describe()
+        self._set_tokens("the token values of the prompt appear here\n")
         self.root.after(60, self._drain)
+        self.root.after(400, self._refresh_tokens)
 
     # ------------------------------------------------------------------ setup
     def _build(self) -> None:
         r = self.root
         r.title("ApexGPT - Language Model Playground")
-        r.geometry("1080x760")
+        r.geometry("1120x860")
         r.configure(bg=BG)
-        r.minsize(880, 620)
+        r.minsize(920, 680)
 
         style = ttk.Style()
         try:
@@ -77,15 +122,28 @@ class ApexGPTApp:
         ctrl.pack(fill="x")
         ctrl.columnconfigure(0, weight=1)
 
-        self.prompt = tk.Text(ctrl, height=3, bg=INPUT_BG, fg=FG,
+        self.prompt = tk.Text(ctrl, height=2, bg=INPUT_BG, fg=FG,
                               insertbackground=FG, relief="flat", font=("Consolas", 11),
                               wrap="word", insertwidth=2, borderwidth=0,
                               padx=8, pady=6)
         self.prompt.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         self.prompt.insert("1.0", "The history of the city is")
+        self.prompt.bind("<<Modified>>", self._prompt_changed)
+
+        # The token values of whatever is in the prompt bar, and what the model
+        # expects to put after it: the same table `apexgpt data tokens` prints.
+        self.token_bar = tk.Text(ctrl, height=7, bg=PANEL, fg=FG, relief="flat",
+                                 font=("Consolas", 9), wrap="none", padx=8,
+                                 pady=6, insertbackground=FG, state="disabled",
+                                 borderwidth=0)
+        self.token_bar.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        self.token_bar.tag_configure("head", foreground=ACCENT,
+                                     font=("Consolas", 9, "bold"))
+        self.token_bar.tag_configure("count", foreground=MUTED)
+        self.token_bar.tag_configure("next", foreground=OK)
 
         grid = ttk.Frame(ctrl)
-        grid.grid(row=1, column=0, sticky="ew")
+        grid.grid(row=2, column=0, sticky="ew")
         for col in (1, 3, 5):
             grid.columnconfigure(col, weight=1)
 
@@ -98,7 +156,7 @@ class ApexGPTApp:
         self.vars["penalty"] = self._slider(grid, 4, "repetition penalty", 1.0, 2.0, 1.0, 0.05, "%.2f")
 
         bar = ttk.Frame(ctrl, padding=(0, 10, 0, 0))
-        bar.grid(row=2, column=0, sticky="ew")
+        bar.grid(row=3, column=0, sticky="ew")
         self.btn_run = ttk.Button(bar, text="Generate", style="Run.TButton", command=self.start)
         self.btn_run.pack(side="left")
         self.btn_stop = ttk.Button(bar, text="Stop", command=self.stop, state="disabled")
@@ -163,6 +221,58 @@ class ApexGPTApp:
         self.output.insert("end", text, tag)
         self.output.see("end")
         self.output.configure(state="disabled")
+
+    # ------------------------------------------------- token values text bar
+    def _set_tokens(self, text: str) -> None:
+        """Write the token bar. Only ever called on the UI thread."""
+        self.token_bar.configure(state="normal")
+        self.token_bar.delete("1.0", "end")
+        for line in text.rstrip("\n").splitlines() or [""]:
+            if line.startswith("next:"):
+                self.token_bar.insert("end", line + "\n", "next")
+            elif line.startswith("  ") and not line.strip().startswith("..."):
+                self.token_bar.insert("end", line + "\n", "count")
+            else:
+                self.token_bar.insert("end", line + "\n", "head")
+        self.token_bar.configure(state="disabled")
+
+    def _prompt_changed(self, _event=None) -> None:
+        if not self.prompt.edit_modified():
+            return
+        self.prompt.edit_modified(False)
+        self._schedule_tokens()
+
+    def _schedule_tokens(self) -> None:
+        """Debounce: a keystroke must not start a forward pass."""
+        if self.token_after is not None:
+            self.root.after_cancel(self.token_after)
+        self.token_after = self.root.after(400, self._refresh_tokens)
+
+    def _refresh_tokens(self) -> None:
+        prompt = self.prompt.get("1.0", "end").strip()
+        self._tokens_wanted = prompt
+        if not prompt:
+            self._set_tokens("type a prompt to see its token values\n")
+            return
+        if self.token_thread and self.token_thread.is_alive():
+            # Counting a big corpus takes seconds; the result is checked against
+            # the prompt again before it is shown, so this is not a dropped
+            # update - the newer prompt is picked up the moment the worker ends.
+            return
+        self._set_tokens("counting the token values...\n")
+        self.token_thread = threading.Thread(target=self._token_worker,
+                                             args=(prompt,), daemon=True)
+        self.token_thread.start()
+
+    def _token_worker(self, prompt: str) -> None:
+        try:
+            report = self.engine.token_values(prompt, top_k=5)
+            self.events.put(("tokens-for", prompt))
+            self.events.put(("tokens", format_token_values(report)))
+        except Exception as exc:
+            self.events.put(("tokens-for", prompt))
+            self.events.put(("tokens",
+                             f"[token values] {type(exc).__name__}: {exc}\n"))
 
     def start(self) -> None:
         if self.thread and self.thread.is_alive():
@@ -255,6 +365,16 @@ class ApexGPTApp:
                 break
             if kind == "idle":
                 idle = True
+                continue
+            if kind == "tokens-for":
+                self._tokens_done = text
+                continue
+            if kind == "tokens":
+                if self._tokens_done != self._tokens_wanted:
+                    # the prompt moved on while this was being counted
+                    self.token_after = self.root.after(10, self._refresh_tokens)
+                else:
+                    self._set_tokens(text)
                 continue
             if kind == "done":
                 summary = text.strip()

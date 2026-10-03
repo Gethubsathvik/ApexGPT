@@ -152,7 +152,7 @@ class StubEngineTokenizer:
     eos_token_id = 999
     vocab_size = 64
 
-    def __call__(self, text, return_tensors=None):
+    def __call__(self, text, return_tensors=None, add_special_tokens=None):
         ids = [1 + (ord(c) % 60) for c in text][:8] or [1]
         if return_tensors == "pt":
             return {"input_ids": torch.tensor([ids])}
@@ -187,6 +187,43 @@ def test_engine_streams_the_requested_token_count(tmp_path):
     req = GenerationRequest(prompt="hello", max_new_tokens=7, temperature=0.8)
     pieces = list(engine.stream(req))
     assert len(pieces) == 7
+
+
+def test_token_values_report_ids_predictions_and_no_corpus(tmp_path):
+    engine = _engine(tmp_path)
+    report = engine.token_values("hello there", top_k=3)
+    ids = [int(i) for i in
+           engine.tokenizer("hello there", add_special_tokens=False)["input_ids"]]
+    assert report["token_ids"] == ids
+    assert [row["token_id"] for row in report["tokens"]] == ids
+    assert all("label" in row for row in report["tokens"])
+    assert len(report["predictions"]) == 3
+    assert all("label" in p for p in report["predictions"])
+    assert report["entropy"] is not None
+    # no corpus for this checkpoint: the header must say so instead of
+    # inventing a frequency
+    assert report["corpus"]["path"] is None
+    assert report["corpus"]["ready"] is False
+    assert all(row["count"] == 0 for row in report["tokens"])
+
+
+def test_token_values_can_skip_the_prediction_pass(tmp_path):
+    engine = _engine(tmp_path)
+    report = engine.token_values("hello", with_predictions=False)
+    assert report["predictions"] == []
+    assert report["entropy"] is None
+    assert report["token_ids"]
+
+
+def test_inventory_is_cached_and_reports_its_note(tmp_path):
+    engine = _engine(tmp_path)
+    engine._inventory = object()
+    engine._inventory_key = None
+    # a checkpoint with no dataset recorded has no corpus to count
+    assert engine.corpus_path() is None
+    assert engine.inventory() is None
+    assert "no corpus" in engine.inventory_note
+    assert engine.inventory_ready is False
 
 
 def test_engine_generate_text_is_join_of_stream(tmp_path):

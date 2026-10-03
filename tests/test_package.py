@@ -121,6 +121,40 @@ def test_ci_workflow_exists_and_runs_the_suite():
     assert "windows-latest" in text and "ubuntu-latest" in text
 
 
+def test_ci_pipeline_keeps_its_gates():
+    """The pipeline's contract: least privilege, bounded jobs, real gates.
+
+    Each of these is a check that was added because something it catches went
+    unnoticed: a job with no timeout hangs until the six-hour default, an
+    end-to-end run is what proves the program works rather than its parts, and
+    a weekly run is how an upstream release announces itself.
+    """
+    import yaml
+
+    root = Path(__file__).resolve().parent.parent
+    text = (root / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(text)
+    triggers = workflow.get("on", workflow.get(True))
+
+    assert workflow.get("permissions") == {"contents": "read"}
+    assert set(triggers) >= {"push", "pull_request", "workflow_dispatch", "schedule"}
+    assert workflow["concurrency"]["cancel-in-progress"] is True
+
+    jobs = workflow["jobs"]
+    assert {"lint", "test", "package", "smoke"} <= set(jobs)
+    for name, job in jobs.items():
+        assert job.get("timeout-minutes"), f"job {name} can hang forever"
+
+    assert "ruff check" in yaml.safe_dump(jobs["lint"])
+    smoke = yaml.safe_dump(jobs["smoke"])
+    for command in ("data prepare", "data tokens", "apexgpt train",
+                    "apexgpt generate"):
+        assert command in smoke, f"the smoke job never runs {command}"
+
+    # every job that can fail needs a report a stranger can read
+    assert "::error" in (root / "tests" / "conftest.py").read_text(encoding="utf-8")
+
+
 def test_no_source_file_is_hidden_by_gitignore():
     """Regression: `.gitignore` had `models/` and `data/`, which also match
     ``apexgpt/models/`` and ``apexgpt/features/data/`` - so the model layer and

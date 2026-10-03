@@ -1446,8 +1446,42 @@ python -m apexgpt gui
 A dark-themed Tk window: prompt box, **real-time token-by-token streaming** on
 a background thread (the UI never freezes), live sliders for temperature,
 top-k, top-p, max tokens, seed and repetition penalty, a KV-cache toggle, a
-**Show next token** panel that prints the ranked candidates before generation
-starts, a **Stop** button mid-generation, and a tok/s readout.
+**Stop** button mid-generation, and a tok/s readout. **Show next token** prints
+the ranked candidates into the output pane before generation starts.
+
+Under the prompt box sits the **token bar**: the value of every id the prompt
+turns into, and what the model expects to put after it. It is the same table
+[`data tokens`](#-every-token-with-its-id) prints and the same ranking
+`generate --predict` prints, refreshed as you type (debounced, on a worker
+thread, with a stale result dropped rather than shown):
+
+```
+26 id(s)  |  shakespeare.txt: 1,115,394 tokens, 65 distinct
+      84  T                    7,015   0.629%
+     104  h                   51,310   4.600%
+     101  e                   94,611   8.482%
+      32  \u0020             169,892  15.232%
+     104  h                   51,310   4.600%
+     105  i                   45,537   4.083%
+     115  s                   49,696   4.455%
+     116  t                   67,009   6.008%
+     111  o                   65,798   5.899%
+     114  r                   48,889   4.383%
+     121  y                   20,448   1.833%
+      32  \u0020             169,892  15.232%
+  ... 14 more id(s)
+next:  \u0020 21.4%  t 12.8%  h 12.5%  e 10.6%  o 7.9%   entropy 2.68 nats
+```
+
+Measured, not mocked: `gpt-shakespeare-char` (10.8M parameters) reading
+`The history of the city is`.
+
+The counts come from the corpus **this checkpoint was trained on** — the dataset
+name is stored in the checkpoint, and the table is cached against the file's
+size and modification time, so a rebuilt corpus invalidates it. Counting a large
+corpus takes seconds, so it happens on a worker thread and the bar says
+`counting...` until it is ready. With no corpus on disk the bar still shows the
+ids and says so, rather than inventing a frequency.
 
 > The 30M model produces word-like but incoherent text. That is the model, not
 > the GUI — lower the temperature to `0.1` and output becomes repetitive, which
@@ -1590,26 +1624,41 @@ pip install pytest httpx
 python -m pytest tests -q
 ```
 
-Every push and pull request runs the suite on Linux and Windows (Python 3.11 and
-3.13) in [`.github/workflows/tests.yml`](.github/workflows/tests.yml), plus a
-second job that builds the wheel and runs `apexgpt --help` from the installed
-package — so packaging cannot rot unnoticed. Each failing test is reported as a
-GitHub annotation, so a red run names itself instead of only its exit code.
+Every push and pull request runs the whole pipeline in
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml). Each failing test
+is reported as a GitHub annotation, so a red run names itself instead of only
+its exit code.
+
+| Job | What it proves | Where |
+|---|---|---|
+| `lint` | `ruff` with only the rules that catch real defects — undefined names, redefinitions, unparseable syntax. Seconds, and it needs no torch | `apexgpt tests` |
+| `test` | the suite on **Linux and Windows × Python 3.11 and 3.13**, then `lab --check` and `doctor`; the junit report is uploaded per job | the matrix |
+| `newest-python` | the next Python release has not broken anything yet (3.14 today) | `ubuntu-latest` |
+| `smoke` | **the program, not its parts**: build a corpus → print the token table → predict from it → train 30 real steps → generate → predict, keeping the loss curves | `ubuntu-latest`, ~4 min |
+| `package` | the wheel builds, installs, runs the CLI from it, carries no tests/corpus/checkpoints, and is uploaded as an artifact | `ubuntu-latest` |
+
+Two more things the workflow does deliberately: a **weekly cron run**, so an
+upstream release that breaks something says so on a Monday morning instead of on
+the day someone tries to use the project; and `permissions: contents: read` with
+a `timeout-minutes` on every job, because a pipeline that can neither write to
+the repository nor hang forever is a pipeline that fails where you can see it.
+`tests/test_package.py` asserts this contract, so the gates cannot quietly
+disappear in a later edit.
 
 | File | Covers |
 |------|--------|
 | `tests/test_model.py` | architecture, causality, KV cache, sampling, LR schedule |
-| `tests/test_data_and_inference.py` | tokenize/split/batch, engine streaming |
+| `tests/test_data_and_inference.py` | tokenize/split/batch, engine streaming, token-value reports |
 | `tests/test_data_sources.py` | corpus registry, URL/local/HF/Kaggle fetch, conversions, per-corpus paths |
-| `tests/test_token_table.py` | `data tokens`: id table, counts and share, `--top`/`--limit`, slices, successor ranking |
+| `tests/test_token_table.py` | `data tokens`: id table, counts and share, `--top`/`--limit`, slices, successor ranking, the shared inventory |
 | `tests/test_device.py` | backend probes, precision policy, presets, wheel indexes |
 | `tests/test_system.py` | live CPU/RAM/disk/process probes, their fallbacks, threshold arithmetic |
 | `tests/test_environment.py` | the scan: spec, requirements, settings, overrides, load scan, shell export, CLI |
 | `tests/test_tokenizers.py` | byte-level vocabulary, corpus specs, checkpoint metadata, per-tokenizer decoding |
 | `tests/test_predict_and_hub.py` | next-token distribution and entropy, per-token logprobs, stop reasons, prediction CLI, Hub/Kaggle capability, `--allow` plumbing |
 | `tests/test_lab.py` | kernel spec, notebook integrity, Lab CLI, a notebook executed in a real kernel |
-| `tests/test_package.py` | every module imports, CLI wiring, layout, `pyproject.toml`, artifact paths, CI workflow |
-| `tests/test_gui.py` | real Tk window, streaming, next-token panel, Stop button |
+| `tests/test_package.py` | every module imports, CLI wiring, layout, `pyproject.toml`, artifact paths, the CI pipeline's own contract |
+| `tests/test_gui.py` | real Tk window, streaming, the token bar and its staleness rule, next-token panel, Stop button |
 | `tests/test_api.py` | HTTP endpoints, SSE, logprobs, model discovery, validation, OpenAPI |
 
 The tests that matter most are the ones that catch **silent** bugs: that a
@@ -1691,6 +1740,8 @@ Notable defects caught during the audit and regression-tested:
 | `data tokens` sent the default corpus to `fetch_corpus` | `ValueError: source kind 'wikipedia' is handled by the data service`, so the one command that only reads text could not inspect the default corpus at all |
 | A lab test called `lab.main(["--register-only"])` for real | it returns 1 when jupyterlab is absent, so all four CI jobs failed on a machine-dependent test while the local suite passed |
 | The optimiser section documented $\beta_2 = 0.999$ | the code uses `beta2 = 0.95`; the README described Adam's textbook default, not this project's |
+| The GUI text bar skipped a refresh when a count was still running | typing during a corpus count silently left the previous prompt's values on screen; now a stale result is dropped and the newer prompt is counted |
+| The token table was printed by the CLI, so nothing else could use it | the counting lived in the view; it is now `build_inventory` in the data service, which the GUI reads |
 
 ---
 

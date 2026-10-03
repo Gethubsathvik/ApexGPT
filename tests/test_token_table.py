@@ -12,6 +12,7 @@ import re
 import pytest
 
 from apexgpt.features.data.cli import build_parser, main, token_table
+from apexgpt.features.data.service import build_inventory
 from apexgpt.features.data.tokenizers import load_tokenizer
 
 
@@ -123,3 +124,55 @@ def test_main_refuses_to_download_wikipedia_for_a_token_table(tmp_path,
     err = capsys.readouterr().err
     assert "is not built" in err
     assert "data prepare --source wikipedia" in err
+
+
+# ---------------------------------------------------- the shared inventory
+def test_inventory_counts_ids_and_keeps_the_pairs(corpus, char_tokenizer):
+    inventory = build_inventory(corpus, char_tokenizer)
+    assert inventory.total == 15
+    assert inventory.distinct == 4
+    assert inventory.characters == 15
+    a = char_tokenizer("a", add_special_tokens=False)["input_ids"][0]
+    assert inventory.counts[a] == 6
+    value = inventory.value_of(a, char_tokenizer)
+    assert (value.count, value.share) == (6, pytest.approx(6 / 15))
+    assert value.label == "a"
+
+
+def test_inventory_escapes_whitespace_in_a_label(corpus, char_tokenizer):
+    inventory = build_inventory(corpus, char_tokenizer)
+    space = char_tokenizer(" ", add_special_tokens=False)["input_ids"][0]
+    newline = char_tokenizer("\n", add_special_tokens=False)["input_ids"][0]
+    assert inventory.value_of(space, char_tokenizer).label == "\\u0020"
+    assert inventory.value_of(newline, char_tokenizer).label == "\\n"
+
+
+def test_successors_are_ranked_pairs_not_frequencies(corpus, char_tokenizer):
+    inventory = build_inventory(corpus, char_tokenizer)
+    a = int(char_tokenizer("a", add_special_tokens=False)["input_ids"][0])
+    b = int(char_tokenizer("b", add_special_tokens=False)["input_ids"][0])
+    ranked = inventory.successors_of(a, top_k=3)
+    assert [(token_id, count) for token_id, count, _ in ranked] == [(b, 6)]
+    assert ranked[0][2] == pytest.approx(1.0)
+
+
+def test_successors_of_an_unseen_id_are_empty(corpus, char_tokenizer):
+    inventory = build_inventory(corpus, char_tokenizer)
+    snow = int(char_tokenizer("\u2603", add_special_tokens=False)["input_ids"][0])
+    if snow in inventory.counts:
+        pytest.skip("this corpus contains that byte")
+    assert inventory.successors_of(snow) == []
+
+
+def test_pairs_are_counted_once_and_only_when_asked_for(corpus, char_tokenizer):
+    inventory = build_inventory(corpus, char_tokenizer)
+    assert inventory._successors is None          # a plain run must not pay for it
+    first = inventory.successors
+    assert inventory.successors is first          # and the table is built once
+
+
+def test_values_for_keeps_the_prompt_order(corpus, char_tokenizer):
+    inventory = build_inventory(corpus, char_tokenizer)
+    ids = [int(i) for i in
+           char_tokenizer("ba", add_special_tokens=False)["input_ids"]]
+    assert [v.token_id for v in inventory.values_for(ids, char_tokenizer)] == ids

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import shutil
 import time
+from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +25,101 @@ from .tokenizers import (TokenizerSpec, load_tokenizer, read_spec,
 
 WIKI_REPO_ID = "wikimedia/wikipedia"
 WIKI_REPO_CONFIG = "20231101.en"
+
+
+# --------------------------------------------------------------------------- #
+# the token table: what every id is worth in a corpus
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class TokenValue:
+    """One id in a corpus: the text it stands for and what it costs to be rare.
+
+    ``count`` and ``share`` come from the corpus the model was trained on, which
+    is the only place a frequency is meaningful - a token is rare in Shakespeare
+    and common in Wikipedia, and the id is the same.
+    """
+
+    token_id: int
+    text: str
+    count: int = 0
+    share: float = 0.0
+
+    @property
+    def label(self) -> str:
+        """Readable text: whitespace escaped, never an invisible blank."""
+        shown = (self.text.replace(" ", "\\u0020").replace("\n", "\\n")
+                 .replace("\r", "\\r").replace("\t", "\\t"))
+        return shown if shown else repr(self.text)
+
+    def as_dict(self) -> dict:
+        return {"token_id": self.token_id, "text": self.text,
+                "label": self.label, "count": self.count,
+                "share": round(self.share, 8)}
+
+
+@dataclass
+class CorpusInventory:
+    """How often each id occurs in one corpus, and what tends to follow it.
+
+    ``counts`` answers "what is in this corpus". ``successors`` answers "what
+    comes next", which is a different question: a token's own frequency says
+    nothing about its right-hand neighbour, so the pairs are counted too.
+    """
+
+    path: Path
+    ids: list[int]
+    counts: dict[int, int]
+    characters: int
+
+    def __post_init__(self) -> None:
+        self._successors: dict[int, Counter] | None = None
+
+    @property
+    def total(self) -> int:
+        return len(self.ids)
+
+    @property
+    def distinct(self) -> int:
+        return len(self.counts)
+
+    def value_of(self, token_id: int, tokenizer) -> TokenValue:
+        count = int(self.counts.get(int(token_id), 0))
+        return TokenValue(int(token_id), tokenizer.decode([int(token_id)]),
+                          count, count / self.total if self.total else 0.0)
+
+    def values_for(self, token_ids, tokenizer) -> list[TokenValue]:
+        return [self.value_of(i, tokenizer) for i in token_ids]
+
+    @property
+    def successors(self) -> dict[int, Counter]:
+        """Bigram counts, built on first use: only ``--predict`` needs them."""
+        if self._successors is None:
+            table: dict[int, Counter] = {}
+            for previous, nxt in zip(self.ids, self.ids[1:]):
+                table.setdefault(int(previous), Counter())[int(nxt)] += 1
+            self._successors = table
+        return self._successors
+
+    def successors_of(self, token_id: int, top_k: int = 8) -> list[tuple[int, int, float]]:
+        """``(token_id, count, probability)`` for what follows ``token_id``.
+
+        Ranked by how often the pair was seen, so the first row is the corpus's
+        own answer rather than the model's.
+        """
+        following = self.successors.get(int(token_id))
+        if not following:
+            return []
+        seen = sum(following.values())
+        return [(int(i), int(c), c / seen)
+                for i, c in following.most_common(max(1, top_k))]
+
+
+def build_inventory(corpus_path: Path | str, tokenizer) -> CorpusInventory:
+    """Tokenize a corpus once and count every id in it."""
+    text = Path(corpus_path).read_text(encoding="utf-8")
+    ids = [int(i) for i in
+           tokenizer(text, add_special_tokens=False)["input_ids"]]
+    return CorpusInventory(Path(corpus_path), ids, Counter(ids), len(text))
 
 
 # --------------------------------------------------------------------------- #

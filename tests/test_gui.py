@@ -18,7 +18,7 @@ pytest.importorskip("tkinter", reason="tkinter is not available")
 tk = pytest.importorskip("tkinter")
 
 from apexgpt.core.config import ModelConfig
-from apexgpt.features.inference.gui import ApexGPTApp
+from apexgpt.features.inference.gui import ApexGPTApp, format_token_values
 from apexgpt.features.inference.service import InferenceEngine
 from apexgpt.models.builder import build_model
 
@@ -41,7 +41,7 @@ class StubTokenizer:
     eos_token_id = 999
     vocab_size = 64
 
-    def __call__(self, text, return_tensors=None):
+    def __call__(self, text, return_tensors=None, add_special_tokens=None):
         ids = [1 + (ord(c) % 60) for c in text][:8] or [1]
         if return_tensors == "pt":
             import torch
@@ -105,6 +105,113 @@ def test_prompt_round_trips(app):
     app.prompt.delete("1.0", "end")
     app.prompt.insert("1.0", "The capital city of")
     assert app.prompt.get("1.0", "end").strip() == "The capital city of"
+
+
+def _pump_tokens(app, until=None, timeout=60):
+    """Pump the Tk loop until the token bar settles, or the timeout expires."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        app.root.update()
+        if app.token_thread and not app.token_thread.is_alive():
+            text = app.token_bar.get("1.0", "end")
+            if until is None or until(text):
+                return text
+            if app.token_after is None:
+                return text
+        time.sleep(0.02)
+    return app.token_bar.get("1.0", "end")
+
+
+def test_token_bar_shows_ids_and_the_next_word(app):
+    app.prompt.delete("1.0", "end")
+    app.prompt.insert("1.0", "The capital city of")
+    app._refresh_tokens()
+    ids = [int(i) for i in
+           app.engine.tokenizer("The capital city of",
+                                add_special_tokens=False)["input_ids"]]
+    text = _pump_tokens(app, until=lambda t: "next:" in t and str(ids[0]) in t)
+
+    assert "id(s)" in text
+    assert str(ids[0]) in text
+    assert "next:" in text
+
+
+def test_token_bar_follows_a_prompt_that_changes_while_counting(app):
+    app.prompt.delete("1.0", "end")
+    app.prompt.insert("1.0", "The capital city of")
+    app._refresh_tokens()
+    # the prompt changes mid-flight; the stale result must not be shown
+    app.prompt.delete("1.0", "end")
+    app.prompt.insert("1.0", "zz")
+    app._refresh_tokens()
+    wanted = app.engine.tokenizer("zz", add_special_tokens=False)["input_ids"]
+    stale = app.engine.tokenizer("The capital city of",
+                                 add_special_tokens=False)["input_ids"]
+    text = _pump_tokens(app, until=lambda t: f"{len(wanted)} id(s)" in t)
+
+    assert f"{len(wanted)} id(s)" in text
+    assert f"{len(stale)} id(s)" not in text
+
+
+def test_token_bar_is_empty_prompt_safe(app):
+    app.prompt.delete("1.0", "end")
+    app._refresh_tokens()
+    app.root.update()
+    assert "type a prompt" in app.token_bar.get("1.0", "end")
+
+
+def test_token_bar_reports_an_engine_failure_without_killing_the_window(app):
+    class Broken:
+        def token_values(self, prompt, top_k=5):
+            raise RuntimeError("no corpus")
+
+    original = app.engine
+    try:
+        app.prompt.delete("1.0", "end")
+        app.prompt.insert("1.0", "hello")
+        app.engine = Broken()
+        app._refresh_tokens()
+        text = _pump_tokens(app, until=lambda t: "no corpus" in t)
+        assert "no corpus" in text
+    finally:
+        app.engine = original
+        app._refresh_tokens()
+        _pump_tokens(app)
+
+
+def test_format_token_values_is_a_pure_function():
+    report = {
+        "token_ids": [65, 66],
+        "tokens": [
+            {"token_id": 65, "text": "A", "label": "A", "count": 3, "share": 0.25},
+            {"token_id": 66, "text": " ", "label": "\\u0020", "count": 1,
+             "share": 0.0833333},
+        ],
+        "corpus": {"path": "/tmp/shakespeare.txt", "tokens": 12, "distinct": 5,
+                   "ready": True},
+        "entropy": 1.2345,
+        "predictions": [{"token_id": 67, "text": "B", "label": "B",
+                         "probability": 0.42, "logprob": -0.867}],
+    }
+    text = format_token_values(report)
+    assert "shakespeare.txt: 12 tokens, 5 distinct" in text
+    assert "65" in text and "25.000%" in text and "\\u0020" in text
+    assert "next:" in text and "B 42.0%" in text and "entropy 1.23 nats" in text
+
+    capped = format_token_values(report | {"token_ids": [1] * 40,
+                                           "tokens": [report["tokens"][0]] * 40},
+                                 max_rows=3)
+    assert "... 37 more id(s)" in capped
+
+
+def test_format_token_values_without_a_corpus_says_so():
+    report = {"token_ids": [7], "tokens": [{"token_id": 7, "text": "x",
+                                            "label": "x", "count": 0, "share": 0.0}],
+              "corpus": {"path": None, "tokens": 0, "distinct": 0, "ready": False},
+              "entropy": None, "predictions": []}
+    text = format_token_values(report)
+    assert "no corpus on disk" in text
+    assert "next:" not in text
 
 
 def test_generation_streams_into_the_output_pane(app):

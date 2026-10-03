@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from collections import Counter
 
 import numpy as np
 import torch
@@ -12,7 +11,8 @@ import torch
 from ...core.config import Config
 from ...core.seeding import set_seed
 from ...core.text import console_safe
-from .service import TokenBatcher, count_distinct_tokens, prepare
+from .service import (TokenBatcher, build_inventory, count_distinct_tokens,
+                      prepare)
 from .sources import DEFAULT_SOURCE, REGISTRY, describe_sources, resolve
 from .tokenizers import load_tokenizer, resolve_corpus_spec
 
@@ -74,25 +74,25 @@ def token_table(corpus_path, tokenizer, top: int = 0, limit: int = 0,
     """Print every token id with its value: text, count and share of the corpus.
 
     This is the vocabulary as the model actually receives it - no abstraction
-    between the file on disk and the integers the network is fed.
+    between the file on disk and the integers the network is fed. The counting
+    itself lives in :mod:`.service`, so the GUI shows the same numbers.
     """
-    text = corpus_path.read_text(encoding="utf-8")
-    ids = tokenizer(text, add_special_tokens=False)["input_ids"]
-    counts = Counter(int(i) for i in ids)
-    total = len(ids)
+    inventory = build_inventory(corpus_path, tokenizer)
+    total = inventory.total
+    counts = inventory.counts
 
     print("=" * 70)
-    print(f"TOKEN TABLE - {corpus_path.name}")
+    print(f"TOKEN TABLE - {inventory.path.name}")
     print("=" * 70)
     print(f"tokenizer      : {getattr(tokenizer, 'kind', 'gpt2')}")
     print(f"vocabulary     : {tokenizer.vocab_size:,} ids"
           f" (eos = {tokenizer.eos_token_id})")
-    print(f"corpus         : {len(text):,} characters")
+    print(f"corpus         : {inventory.characters:,} characters")
     print(f"tokens         : {total:,}")
-    print(f"distinct ids   : {len(counts):,} "
-          f"({100.0 * len(counts) / tokenizer.vocab_size:.1f}% of the vocabulary)")
-    if text:
-        print(f"compression    : {total / len(text):.2f} tokens per character")
+    print(f"distinct ids   : {inventory.distinct:,} "
+          f"({100.0 * inventory.distinct / tokenizer.vocab_size:.1f}% of the vocabulary)")
+    if inventory.characters:
+        print(f"compression    : {total / inventory.characters:.2f} tokens per character")
     print("=" * 70)
     print(f"{'id':>7}  {'token':<14} {'count':>10} {'share':>8}  rank")
     print("-" * 70)
@@ -102,10 +102,8 @@ def token_table(corpus_path, tokenizer, top: int = 0, limit: int = 0,
         ordered = ordered[:top]
     rows = ordered[:limit] if limit else ordered
     for rank, (token_id, count) in enumerate(rows, start=1):
-        piece = tokenizer.decode([token_id])
-        shown = (piece.replace(" ", "\\u0020").replace("\n", "\\n")
-                 .replace("\t", "\\t").replace("\r", "\\r")) or repr(piece)
-        print(f"{token_id:>7}  {shown:<14} {count:>10,} "
+        value = inventory.value_of(token_id, tokenizer)
+        print(f"{token_id:>7}  {value.label:<14} {count:>10,} "
               f"{100.0 * count / total:>7.3f}%  #{rank}")
 
     if not rows:
@@ -122,21 +120,22 @@ def token_table(corpus_path, tokenizer, top: int = 0, limit: int = 0,
         start = max(0, show_text)
         end = min(total, show_text + 24)
         if end > start:
-            window = ids[start:end]
+            window = inventory.ids[start:end]
             print("\n-- a slice of the corpus, id by id --")
             print(f"ids [{start}:{end}] = {[int(i) for i in window]}")
             print("      " + " | ".join(
                 f"{int(i)}:{tokenizer.decode([int(i)])!r}" for i in window))
 
     if predict:
-        prompt_ids = tokenizer(predict, add_special_tokens=False)["input_ids"]
+        prompt_ids = [int(i) for i in
+                      tokenizer(predict, add_special_tokens=False)["input_ids"]]
         print("\n-- prompt, id by id --")
         print(f"text : {console_safe(predict)!r}")
-        print(f"ids  : {[int(i) for i in prompt_ids]}")
-        _next_token_table(ids, tokenizer, prompt_ids, top_k)
+        print(f"ids  : {prompt_ids}")
+        _print_successors(inventory, tokenizer, prompt_ids, top_k)
 
 
-def _next_token_table(ids, tokenizer, prompt_ids, top_k: int) -> None:
+def _print_successors(inventory, tokenizer, prompt_ids, top_k: int) -> None:
     """Rank what follows the prompt's last id, from the corpus itself.
 
     Counts of single tokens cannot say what comes *next* - that needs pairs. This
@@ -145,25 +144,21 @@ def _next_token_table(ids, tokenizer, prompt_ids, top_k: int) -> None:
     trained checkpoint does better, and ``apexgpt generate --predict`` prints the
     model's own ranking; this one needs no model at all.
     """
-    successors: dict[int, Counter] = {}
-    for previous, nxt in zip(ids, ids[1:]):
-        successors.setdefault(int(previous), Counter())[int(nxt)] += 1
-
     print("\n-- next token, from bigram counts in this corpus --")
     if not prompt_ids:
         print("(empty prompt)")
         return
-    last = int(prompt_ids[-1])
-    following = successors.get(last)
-    total_followers = sum(following.values()) if following else 0
+    last = prompt_ids[-1]
+    following = inventory.successors.get(last)
     print(f"last id : {last} = {tokenizer.decode([last])!r}")
-    print(f"seen {total_followers:,} times in this corpus")
     if not following:
         print("no successor was observed for this id")
         return
-    for rank, (token_id, count) in enumerate(following.most_common(top_k), start=1):
+    print(f"seen {sum(following.values()):,} times in this corpus")
+    for rank, (token_id, count, probability) in enumerate(
+            inventory.successors_of(last, top_k), start=1):
         print(f"   {rank}. id={token_id:<7} count={count:>7,} "
-              f"p={count / total_followers:>7.3%}  "
+              f"p={probability:>7.3%}  "
               f"{tokenizer.decode([token_id])!r}")
 
 
