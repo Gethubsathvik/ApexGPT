@@ -279,8 +279,11 @@ python -m apexgpt doctor                     # verify the environment
 python -m apexgpt data prepare --source shakespeare    # ~1 MB, ~4 s
 python -m apexgpt train --dataset shakespeare --preset cpu-tiny
 python -m apexgpt generate --prompt "ROMEO:" --max-new-tokens 200
+python -m apexgpt generate --prompt "ROMEO:" --predict 8   # what it expects next
 
 python -m apexgpt lab --install              # Jupyter Lab, kernel preconfigured
+python -m apexgpt setup --hub --install       # optional: Hugging Face + Kaggle
+python -m apexgpt hub check                   # what the Hub can do here
 ```
 
 The full-size route on a machine with room for it:
@@ -993,7 +996,7 @@ cached decoding matches a full forward pass to `1e-4`.
 Tiny Shakespeare has its own vocabulary: no merge table, no download, no
 `<unk>`, and nothing that can be thrown off by a character the corpus never
 contained. The byte-level tokenizer maps each byte to an id `0–255` and uses
-`256` for `<|endoftext|>`, so **every** input is representable — emoji, other
+`256` for the eos token, so **every** input is representable — emoji, other
 scripts, and a multi-byte character sliced in half at the block edge.
 
 ```bash
@@ -1489,7 +1492,7 @@ Notable defects caught during the audit and regression-tested:
 | Assigning `DataConfig.dataset` left `binary_dir` alone | trained on the **previous** corpus's tokens |
 | `DataConfig` `raw_dir`/`binary_dir` could not be overridden per corpus | every corpus shared one directory |
 | Char-corpus reports decoded with GPT-2 BPE | `UnicodeEncodeError: 'charmap' codec can't encode '\ufffd'` on Windows consoles |
-| `ByteTokenizer.decode` masked ids into bytes | `<|endoftext|>` decoded to a NUL character instead of nothing |
+| `ByteTokenizer.decode` masked ids into bytes | the eos id (256) decoded to a NUL character instead of nothing |
 | Windows `System Idle Process` (pid 0) in the process table | topped the "busiest processes" list forever, at a nonsense 200% CPU |
 | `hub model --allow … --predict …` | the file patterns were dropped, so a 3.5 GB repo downloaded in full |
 | `tokenizer(...)` assumed a `BatchEncoding` | `AttributeError` on any tokenizer that returns a plain dict |
