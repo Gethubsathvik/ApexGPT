@@ -22,7 +22,7 @@ COMMANDS = {
     "setup":    ("apexgpt.tools.setup", "install dependencies for this machine"),
     "doctor":   ("apexgpt.tools.doctor", "verify the environment"),
     "data":     ("apexgpt.features.data.cli",
-                 "build a corpus: shakespeare, wikipedia, Hugging Face, Kaggle"),
+                 "build a corpus, or list and inspect its tokens"),
     "hub":      ("apexgpt.features.hub.cli",
                  "download Hugging Face / Kaggle models and datasets, run one"),
     "train":    ("apexgpt.features.training.cli", "train the model"),
