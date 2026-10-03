@@ -172,6 +172,11 @@ def test_lab_cli_list_reports_notebooks_and_kernel(capsys):
 
 def test_lab_cli_registers_the_kernel_without_starting_lab(tmp_path, capsys,
                                                            monkeypatch):
+    # what this tests is the kernel spec that gets written, so the lab is
+    # stubbed as present: whether jupyterlab is installed on the machine running
+    # the suite is a separate question, answered by its own test below
+    monkeypatch.setattr(lab, "lab_installed", lambda: True)
+    monkeypatch.setattr(lab, "ipykernel_installed", lambda: True)
     monkeypatch.setattr(lab, "kernel_dir", lambda *a, **k: tmp_path / KERNEL_NAME)
     assert lab.main(["--register-only"]) == 0
     out = capsys.readouterr().out

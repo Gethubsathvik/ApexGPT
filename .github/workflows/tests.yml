@@ -46,7 +46,10 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install -r requirements-api.txt
           python -m pip install pytest
-          python -m pip install -e .
+          # the notebook extra too: 'lab --check' below and the lab suite need
+          # jupyterlab and ipykernel, and a suite that silently skips itself
+          # proves nothing
+          python -m pip install -e ".[notebook]"
 
       - name: Show what the scan resolved
         run: python -m apexgpt env --no-load-scan
