@@ -121,6 +121,45 @@ def test_ci_workflow_exists_and_runs_the_suite():
     assert "windows-latest" in text and "ubuntu-latest" in text
 
 
+def test_no_source_file_is_hidden_by_gitignore():
+    """Regression: `.gitignore` had `models/` and `data/`, which also match
+    ``apexgpt/models/`` and ``apexgpt/features/data/`` - so the model layer and
+    the whole corpus pipeline were missing from every GitHub clone while the
+    local suite passed. CI caught it; this stops it recurring.
+    """
+    import shutil
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent
+    if shutil.which("git") is None or not (root / ".git").exists():
+        pytest.skip("not a git checkout")
+
+    def git(*args) -> str:
+        done = subprocess.run(["git", *args], cwd=root, capture_output=True,
+                              text=True)
+        assert done.returncode == 0, done.stderr
+        return done.stdout
+
+    source_suffixes = (".py", ".ipynb", ".toml", ".yml", ".json")
+    ignored = [line for line in
+               git("ls-files", "--others", "--ignored", "--exclude-standard",
+                   "--", "apexgpt", "tests", "notebooks", ".github").splitlines()
+               if line.endswith(source_suffixes)]
+    assert ignored == [], f"git is ignoring source files: {ignored}"
+
+    tracked = set(git("ls-files").split())
+    missing = [path for path in tracked if not (root / path).exists()]
+    assert missing == [], f"tracked but absent from disk: {missing}"
+
+    # every package the wheel ships must actually be in the repository
+    tomllib = pytest.importorskip("tomllib")
+    with (root / "pyproject.toml").open("rb") as fh:
+        packages = tomllib.load(fh)["tool"]["setuptools"]["packages"]
+    untracked = [p for p in packages
+                 if f"{p.replace('.', '/')}/__init__.py" not in tracked]
+    assert untracked == [], f"package slices missing from git: {untracked}"
+
+
 def test_dispatcher_lists_all_commands(capsys):
     from apexgpt.__main__ import main
     assert main([]) == 0

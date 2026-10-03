@@ -9,15 +9,18 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
-dist/
+/build/
+/dist/
 *.egg-info/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
 
 # Trained weights and checkpoints (large binaries)
-models/
+#
+# Anchored to the repository root on purpose: an unanchored "models/" also
+# matches apexgpt/models/ and silently keeps the model layer out of the repo.
+/models/
 *.pt
 *.pth
 *.ckpt
@@ -27,19 +30,20 @@ models/
 *.npz
 
 # Downloaded and tokenized datasets
-data/
+# Anchored for the same reason - apexgpt/features/data/ is source.
+/data/
 *.txt.gz
-corpus*.txt
-wiki_corpus.txt
+/corpus*.txt
+/wiki_corpus.txt
 
 # Logs and runtime output
 *.log
 *.err
-data_prep.log
-train.log
-logs/
-runs/
-out/
+/data_prep.log
+/train.log
+/logs/
+/runs/
+/out/
 
 # Generated plots
 loss_curves.png
@@ -62,3 +66,9 @@ desktop.ini
 # Environment overrides
 .env
 .env.*
+
+# Never ignore source. These two directories are named like the artifacts
+# above, and a slice that git quietly refuses to track is a slice that is
+# missing from the GitHub clone.
+!apexgpt/features/data/
+!apexgpt/models/
