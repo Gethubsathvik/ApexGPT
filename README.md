@@ -515,6 +515,7 @@ python -m apexgpt data prepare --source tinystories --target-mb 500
 python -m apexgpt data prepare --source hf:roneneldan/TinyStories
 python -m apexgpt data prepare --source kaggle:user/dataset-slug
 python -m apexgpt data prepare --source local:my_notes.txt
+python -m apexgpt data tokens --tokenizer char --top 20   # every id, with its value
 
 python -m apexgpt train --dataset shakespeare              # train on it
 ```
@@ -541,6 +542,75 @@ round-trip verified exact), written as flat `uint16` streams and split 80/20.
 Useful flags: `--tokenizer`, `--target-mb`, `--num-shards`, `--train-split`,
 `--keep-parquet`, `--force` (re-tokenize from the cached text), `--redownload`
 (refetch), and `--no-report`.
+
+### 🔢 Every token, with its id
+
+`python -m apexgpt data tokens` is the corpus as the model actually receives it:
+one numbered row per id, with the text it stands for, how often it occurs, and
+what share of the corpus that is. Counts of ids — they answer *what is in the
+vocabulary*; the successor ranking answers *what comes next*.
+
+```bash
+python -m apexgpt data tokens --tokenizer char --top 10
+python -m apexgpt data tokens --source local:my_notes.txt --limit 40
+```
+
+```
+======================================================================
+TOKEN TABLE - shakespeare.txt
+======================================================================
+tokenizer      : char
+vocabulary     : 257 ids (eos = 256)
+corpus         : 1,115,394 characters
+tokens         : 1,115,394
+distinct ids   : 65 (25.3% of the vocabulary)
+compression    : 1.00 tokens per character
+======================================================================
+     id  token               count    share  rank
+----------------------------------------------------------------------
+     32  \u0020            169,892  15.232%  #1
+    101  e                  94,611   8.482%  #2
+    116  t                  67,009   6.008%  #3
+    ...
+-- the 10 most frequent of 65 ids: 62.5% of the corpus; use --top 0 for every id
+```
+
+By default every id that occurs is listed, in id order; `--top N` shows only the
+N most frequent (with the share of the corpus they account for) and `--limit N`
+caps how many rows print. The same corpus with the GPT-2 BPE default is
+`338,025` tokens over `11,706` distinct ids — 3.30 tokens per character — which
+is the whole tokenizer comparison, measured on the same bytes:
+
+| `--tokenizer` | ids | tokens | distinct ids used | tokens/char |
+|---------------|-----|--------|-------------------|-------------|
+| `char` | 257 | 1,115,394 | 65 | 1.00 |
+| `gpt2` | 50,257 | 338,025 | 11,706 | 3.30 |
+
+Two extras make the table checkable rather than decorative:
+
+```bash
+python -m apexgpt data tokens --slice-at 5000          # a 24-token slice, id by id
+python -m apexgpt data tokens --predict "KING RICHARD II:"
+```
+
+```
+-- prompt, id by id --
+text : 'KING RICHARD II:'
+ids  : [75, 73, 78, 71, 32, 82, 73, 67, 72, 65, 82, 68, 32, 73, 73, 58]
+
+-- next token, from bigram counts in this corpus --
+last id : 58 = ':'
+seen 10,316 times in this corpus
+   1. id=10      count=  8,762 p=84.936%  '\n'
+   2. id=32      count=  1,513 p=14.667%  ' '
+```
+
+`--predict` ranks successors by counting pairs in the corpus, so it needs no
+model at all; a trained checkpoint does better, and
+[🔮 Predict the next word](#-predict-the-next-word-with-its-probability) prints
+the model's own ranking. `tokens` reads text, so it never downloads the 772 MB
+Wikipedia corpus — it asks you to `data prepare --source wikipedia
+--target-mb 5` first.
 
 ### Models and training scripts from Hugging Face
 
@@ -1532,6 +1602,7 @@ Notable defects caught during the audit and regression-tested:
 | The GUI's next-token panel read a Tk variable from the worker thread | `RuntimeError: main thread is not in main loop` — the same trap as the earlier streaming bug |
 | `PROJECT_ROOT` was `parent.parent.parent` unconditionally | an installed copy wrote checkpoints and corpora into `site-packages` |
 | `/v1/completions` hardcoded `"logprobs": null` and `finish_reason: "length"` | clients could not score the model, and an eos stop was reported as a full-length one |
+| `data tokens` sent the default corpus to `fetch_corpus` | `ValueError: source kind 'wikipedia' is handled by the data service`, so the one command that only reads text could not inspect the default corpus at all |
 
 ---
 

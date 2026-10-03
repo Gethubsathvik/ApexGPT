@@ -10,6 +10,7 @@ corpus came from. Only the fetch step differs::
     python -m apexgpt data prepare --source hf:roneneldan/TinyStories
     python -m apexgpt data prepare --source kaggle:user/dataset-slug
     python -m apexgpt data prepare --source local:my_text.txt
+    python -m apexgpt data tokens --tokenizer char --top 20
 
 Hugging Face datasets are streamed and cut off at ``--target-mb`` rather than
 downloaded whole, so a 12 GB corpus is usable on a laptop with 8 GB of RAM.

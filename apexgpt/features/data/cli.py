@@ -1,8 +1,10 @@
-"""Data feature CLI: list corpora, build one, print a tokenization report."""
+"""Data feature CLI: list corpora, build one, inspect its tokens, report."""
 from __future__ import annotations
 
 import argparse
 import os
+import sys
+from collections import Counter
 
 import numpy as np
 import torch
@@ -67,24 +69,170 @@ def report(cfg, tokenizer, n_windows: int = 5) -> None:
     print("=" * 70)
 
 
+def token_table(corpus_path, tokenizer, top: int = 0, limit: int = 0,
+                show_text: int = 0, predict: str = "", top_k: int = 8) -> None:
+    """Print every token id with its value: text, count and share of the corpus.
+
+    This is the vocabulary as the model actually receives it - no abstraction
+    between the file on disk and the integers the network is fed.
+    """
+    text = corpus_path.read_text(encoding="utf-8")
+    ids = tokenizer(text, add_special_tokens=False)["input_ids"]
+    counts = Counter(int(i) for i in ids)
+    total = len(ids)
+
+    print("=" * 70)
+    print(f"TOKEN TABLE - {corpus_path.name}")
+    print("=" * 70)
+    print(f"tokenizer      : {getattr(tokenizer, 'kind', 'gpt2')}")
+    print(f"vocabulary     : {tokenizer.vocab_size:,} ids"
+          f" (eos = {tokenizer.eos_token_id})")
+    print(f"corpus         : {len(text):,} characters")
+    print(f"tokens         : {total:,}")
+    print(f"distinct ids   : {len(counts):,} "
+          f"({100.0 * len(counts) / tokenizer.vocab_size:.1f}% of the vocabulary)")
+    if text:
+        print(f"compression    : {total / len(text):.2f} tokens per character")
+    print("=" * 70)
+    print(f"{'id':>7}  {'token':<14} {'count':>10} {'share':>8}  rank")
+    print("-" * 70)
+
+    ordered = counts.most_common() if top else sorted(counts.items())
+    if top:
+        ordered = ordered[:top]
+    rows = ordered[:limit] if limit else ordered
+    for rank, (token_id, count) in enumerate(rows, start=1):
+        piece = tokenizer.decode([token_id])
+        shown = (piece.replace(" ", "\\u0020").replace("\n", "\\n")
+                 .replace("\t", "\\t").replace("\r", "\\r")) or repr(piece)
+        print(f"{token_id:>7}  {shown:<14} {count:>10,} "
+              f"{100.0 * count / total:>7.3f}%  #{rank}")
+
+    if not rows:
+        print("(the corpus produced no tokens)")
+    if limit and len(ordered) > limit:
+        print(f"... {len(ordered) - limit:,} more ids; use --limit 0 to see them all")
+    if top and len(counts) > top:
+        shown_top = sum(count for _, count in ordered)
+        print(f"-- the {len(ordered)} most frequent of {len(counts):,} ids: "
+              f"{100.0 * shown_top / total:.1f}% of the corpus; "
+              f"use --top 0 for every id")
+
+    if show_text:
+        start = max(0, show_text)
+        end = min(total, show_text + 24)
+        if end > start:
+            window = ids[start:end]
+            print("\n-- a slice of the corpus, id by id --")
+            print(f"ids [{start}:{end}] = {[int(i) for i in window]}")
+            print("      " + " | ".join(
+                f"{int(i)}:{tokenizer.decode([int(i)])!r}" for i in window))
+
+    if predict:
+        prompt_ids = tokenizer(predict, add_special_tokens=False)["input_ids"]
+        print("\n-- prompt, id by id --")
+        print(f"text : {console_safe(predict)!r}")
+        print(f"ids  : {[int(i) for i in prompt_ids]}")
+        _next_token_table(ids, tokenizer, prompt_ids, top_k)
+
+
+def _next_token_table(ids, tokenizer, prompt_ids, top_k: int) -> None:
+    """Rank what follows the prompt's last id, from the corpus itself.
+
+    Counts of single tokens cannot say what comes *next* - that needs pairs. This
+    counts bigrams, which is a real predictor and costs one pass over the corpus:
+    the successor of every id with the number of times it was seen there. A
+    trained checkpoint does better, and ``apexgpt generate --predict`` prints the
+    model's own ranking; this one needs no model at all.
+    """
+    successors: dict[int, Counter] = {}
+    for previous, nxt in zip(ids, ids[1:]):
+        successors.setdefault(int(previous), Counter())[int(nxt)] += 1
+
+    print("\n-- next token, from bigram counts in this corpus --")
+    if not prompt_ids:
+        print("(empty prompt)")
+        return
+    last = int(prompt_ids[-1])
+    following = successors.get(last)
+    total_followers = sum(following.values()) if following else 0
+    print(f"last id : {last} = {tokenizer.decode([last])!r}")
+    print(f"seen {total_followers:,} times in this corpus")
+    if not following:
+        print("no successor was observed for this id")
+        return
+    for rank, (token_id, count) in enumerate(following.most_common(top_k), start=1):
+        print(f"   {rank}. id={token_id:<7} count={count:>7,} "
+              f"p={count / total_followers:>7.3%}  "
+              f"{tokenizer.decode([token_id])!r}")
+
+
+def _tokens_command(args, corpus, cfg) -> int:
+    """``data tokens``: the id table for a corpus, built or already on disk."""
+    from .sources import fetch_corpus
+
+    if args.source and corpus.kind in ("local", "text-url", "hf-stream", "kaggle"):
+        # a local file or a URL needs no index: tokenize it where it lies
+        corpus_path = corpus_path_for(corpus, cfg.data.raw_dir)
+    else:
+        if not cfg.data.corpus_path.exists():
+            if corpus.kind == "wikipedia":
+                print("[error] the Wikipedia corpus is not built. This command "
+                      "reads text, it does not download 772 MB of parquet:\n"
+                      "         python -m apexgpt data prepare --source wikipedia "
+                      "--target-mb 5\n"
+                      "         python -m apexgpt data tokens --source wikipedia",
+                      file=sys.stderr)
+                return 1
+            print(f"[tokens]  fetching {corpus.key}")
+            fetch_corpus(corpus, cfg.data.corpus_path, cfg.data.raw_dir,
+                         target_mb=max(1, args.target_mb))
+        corpus_path = cfg.data.corpus_path
+
+    if not corpus_path.exists():
+        print(f"[error] no corpus text at {corpus_path}", file=sys.stderr)
+        return 1
+
+    tokenizer = load_tokenizer(cfg.data.tokenizer)
+    print(f"[tokens]  reading {corpus_path}")
+    token_table(corpus_path, tokenizer, top=args.top, limit=args.limit,
+                show_text=args.slice_at, predict=args.predict,
+                top_k=args.top_k)
+    print(f"\ntrain a model on it:  python -m apexgpt train "
+          f"--dataset {corpus.key} --tokenizer {cfg.data.tokenizer}")
+    print("model's own ranking:  python -m apexgpt generate --predict 8")
+    return 0
+
+
+def corpus_path_for(corpus, raw_dir):
+    """Where a one-off ``local:``/``url:`` corpus is read from."""
+    from .sources import fetch_corpus
+
+    target = raw_dir / corpus.key / f"{corpus.key}.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return fetch_corpus(corpus, target, raw_dir, target_mb=50)
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="apexgpt data",
         description="Prepare ApexGPT training data from Wikipedia, tiny "
                     "Shakespeare, a Hugging Face dataset, Kaggle, or a local file")
     ap.add_argument("command", nargs="?", default="prepare",
-                    choices=["prepare", "sources"],
-                    help="'prepare' (default) builds the corpus; 'sources' lists "
-                         "what is available")
+                     choices=["prepare", "sources", "tokens"],
+                     help="'prepare' (default) builds the corpus; 'sources' lists "
+                          "what is available; 'tokens' prints every token id with "
+                          "its value and predicts the next one")
     ap.add_argument("--source", default=None,
                     help="corpus: " + ", ".join(sorted(REGISTRY))
                          + ", or hf:<repo_id> / kaggle:<slug> / local:<path> / url:<link>")
     ap.add_argument("--dataset", default=None,
-                    help=f"corpus for the data directories (default {DEFAULT_SOURCE})")
+                     help=f"corpus for the data directories "
+                          f"(default {DEFAULT_SOURCE}, or shakespeare for 'tokens')")
     ap.add_argument("--tokenizer", default=None, choices=["gpt2", "char"],
-                    help="gpt2: 50,257 ids, best for big corpora. "
-                         "char: 257 ids (one per byte), best for small corpora "
-                         "and small models - see the README comparison")
+                     help="gpt2: 50,257 ids, best for big corpora. "
+                          "char: 257 ids (one per byte), best for small corpora "
+                          "and small models - see the README comparison")
     ap.add_argument("--target-mb", type=int, default=1000,
                     help="raw download budget in MB (500-1000 recommended)")
     ap.add_argument("--num-shards", type=int, default=2,
@@ -101,6 +249,19 @@ def build_parser() -> argparse.ArgumentParser:
                     help="fraction of tokens used for training")
     ap.add_argument("--no-report", action="store_true",
                     help="skip the tokenization sample report")
+    # 'tokens' only
+    ap.add_argument("--top", type=int, default=0,
+                    help="tokens: show only the N most frequent ids (0 = all)")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="tokens: show at most N rows (0 = all ids)")
+    ap.add_argument("--slice-at", type=int, default=0, metavar="CHAR",
+                    help="tokens: print the ids of a 24-token slice at this "
+                         "character offset")
+    ap.add_argument("--predict", default="", metavar="TEXT",
+                    help="tokens: rank the next token after TEXT, from bigram "
+                         "counts in this corpus")
+    ap.add_argument("--top-k", type=int, default=8,
+                    help="tokens: how many candidate successors to rank")
     return ap
 
 
@@ -113,18 +274,23 @@ def main(argv=None) -> int:
         print("=" * 70)
         return 0
 
+    # 'tokens' inspects one corpus, so it defaults to the smallest one rather
+    # than to the 772 MB Wikipedia default
+    fallback = "shakespeare" if args.command == "tokens" else DEFAULT_SOURCE
     try:
-        corpus = resolve(args.source or args.dataset or DEFAULT_SOURCE)
+        corpus = resolve(args.source or args.dataset or fallback)
     except ValueError as exc:
         print(f"[error] {exc}")
         return 1
 
     cfg = Config()
-    set_seed(cfg.train.seed)
     cfg.data.train_split = args.train_split
     cfg.data.select_dataset(corpus.key)
     if args.tokenizer:
         cfg.data.tokenizer = args.tokenizer
+
+    if args.command == "tokens":
+        return _tokens_command(args, corpus, cfg)
 
     result = prepare(cfg.data, target_mb=args.target_mb,
                      num_shards=args.num_shards,

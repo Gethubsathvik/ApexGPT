@@ -52,7 +52,17 @@ jobs:
         run: python -m apexgpt env --no-load-scan
 
       - name: Run the tests
-        run: python -m pytest tests
+        run: python -m pytest tests --tb=short --junitxml=pytest-report.xml
+
+      # A failure the maintainer cannot read is a failure that cannot be fixed:
+      # the report travels with the run.
+      - name: Publish the test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: pytest-report.xml
+          if-no-files-found: warn
 
       - name: Verify the notebook kernel spec and the package layout
         run: |

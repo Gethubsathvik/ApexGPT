@@ -293,19 +293,23 @@ def test_data_cli_reports_an_unknown_source(capsys):
 def test_prepare_builds_tokens_from_a_local_file(tmp_path):
     """The whole path: local text -> uint16 binaries -> next-token pairs."""
     from apexgpt.features.data.service import TokenBatcher, prepare
+    from apexgpt.features.data.tokenizers import load_tokenizer
+
+    # The only step that leaves the machine. Checked on its own so that a hub
+    # outage or a rate limit skips the test instead of failing it - and so a
+    # real defect in prepare() still fails it.
+    try:
+        load_tokenizer("gpt2")
+    except Exception as exc:
+        pytest.skip(f"GPT-2 tokenizer unavailable: {type(exc).__name__}: {exc}")
 
     source = tmp_path / "corpus.txt"
     source.write_text(SHAKESPEARE_LINES * 40, encoding="utf-8")
 
     cfg = DataConfig(raw_dir=tmp_path / "raw", binary_dir=tmp_path / "bin")
     cfg.select_dataset("local")
-    try:
-        result = prepare(cfg, source="local:" + str(source),
-                         progress=lambda *a: None)
-    except Exception as exc:                       # tokenizer needs the network
-        if "token" in str(exc).lower() or "connection" in str(exc).lower():
-            pytest.skip(f"GPT-2 tokenizer unavailable: {exc}")
-        raise
+    result = prepare(cfg, source="local:" + str(source),
+                     progress=lambda *a: None)
 
     assert result["dataset"] == "local"
     assert cfg.is_ready()
