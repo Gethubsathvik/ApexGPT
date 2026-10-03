@@ -98,6 +98,20 @@ Machine spec
 
 ---
 
+> **Run it on localhost, one line, no arguments:**
+>
+> ```bash
+> python -m apexgpt serve
+> ```
+>
+> Binds **http://127.0.0.1:8000**, finds the most recent real checkpoint by
+> itself, loads the tokenizer that checkpoint recorded, and serves the GUI-free
+> API: `/health`, `/generate`, `/predict`, `/stream`, `/v1/completions`,
+> `/v1/models`, and interactive docs at `/docs`. Spell the defaults out with
+> `python -m apexgpt serve --host 127.0.0.1 --port 8000`; bind `0.0.0.0`
+> instead to let other machines on your network reach it. Full detail in
+> [🌐 HTTP API](#-http-api).
+
 ## 💻 Hardware portability
 
 ApexGPT has no hard-coded CUDA. `core/device.py` probes the machine once and every
