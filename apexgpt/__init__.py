@@ -1,4 +1,4 @@
-"""TinyLLM - a GPT-style transformer language model built from scratch.
+"""ApexGPT - a GPT-style transformer language model built from scratch.
 
 Architecture
 ------------

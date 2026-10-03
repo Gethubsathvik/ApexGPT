@@ -1,18 +1,18 @@
-# 🧠 TinyLLM
+# 🧠 ApexGPT
 
 > A GPT-style transformer language model built from scratch in PyTorch — dataset pipeline, training loop, CLI, desktop GUI, Jupyter Lab, and an optional HTTP inference service.
 
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/pytorch-2.4%2B-ee4c2c.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-225%20passing-success.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-312%20passing-success.svg)](tests)
 
 ---
 
 ## 📑 Contents
 
 - [✨ What it does](#-what-it-does)
-- [🖥️ Verified hardware](#%EF%B8%8F-verified-hardware)
+- [🖥️ Reference configuration](#%EF%B8%8F-reference-configuration)
 - [💻 Hardware portability](#-hardware-portability)
 - [🔍 Environment scan](#-environment-scan)
 - [🚀 Quick start](#-quick-start)
@@ -23,9 +23,12 @@
 - [📚 Corpora](#-corpora)
 - [🎭 Tiny Shakespeare in 5 minutes](#-tiny-shakespeare-in-5-minutes)
 - [🏗️ Architecture](#%EF%B8%8F-architecture-mvc--service--feature-based)
+- [📐 Mathematics](#%EF%B8%8F-the-mathematics-behind-apexgpt)
 - [🤖 Model](#-model)
+- [🔤 Tokenizers](#-tokenizers)
 - [🎓 Training](#-training)
 - [💬 Inference](#-inference)
+- [🌐 Hugging Face & Kaggle](#-hugging-face--kaggle)
 - [🖥️ GUI](#%EF%B8%8F-gui)
 - [🌐 HTTP API](#-http-api)
 - [🤖 Android](#-android)
@@ -37,7 +40,7 @@
 
 ## ✨ What it does
 
-- **Scans the machine once** — CPU, cores, RAM, adapters, every PyTorch backend, and every requirement — then resolves and applies the settings TinyLLM will run with
+- **Scans the machine once** — CPU, cores, RAM, adapters, every PyTorch backend, and every requirement — then resolves and applies the settings ApexGPT will run with
 - Runs on **CPU, NVIDIA CUDA, AMD ROCm, Intel XPU, Apple Metal, and Windows DirectML** — detected automatically, never silently
 - Trains a **GPT from scratch** — no `transformers` model classes, every layer hand-written
 - **123.8M parameters** at the requested 12 layers / 768 hidden / 12 heads
@@ -45,58 +48,59 @@
 - Next-token prediction with AdamW, warmup + cosine decay, and gradient clipping
 - Samples with **temperature, top-k, top-p**, and repetition penalty
 - Four front ends over one implementation: **CLI**, **Tkinter GUI**, **Jupyter Lab**, **HTTP service**
-- **Automated tests** — 225 of them, covering causality, the KV cache, sampling, portability, corpus fetching, notebooks and the GUI
+- **Automated tests** — 312 of them, covering causality, the KV cache, sampling, portability, corpus fetching, the live system scan, the next-token distribution, notebooks and the GUI
 
 ---
 
-## 🖥️ Verified hardware
+## 🖥️ Reference configuration
 
-Everything below was measured on the machine this was built on.
-
-| Item | Value |
-|------|-------|
-| CPU | **AMD Ryzen 3 7320U**, 4 cores / 8 threads |
-| GPU | **AMD Radeon integrated graphics** — no NVIDIA GPU |
-| CUDA | **Not available** — `nvidia-smi` and `nvcc` absent |
-| Python | 3.14.7 (64-bit) |
-| PyTorch | 2.14.1+cpu |
-| RAM | ~8 GB (corpus is streamed to disk to stay inside it) |
-
-`python -m tinyllm env` prints that same table for whatever machine it runs on,
-plus the requirements and the resolved settings:
+The published timings in this README come from a deliberately modest reference
+box: **a 4-core / 8-thread CPU, no discrete GPU, about 8 GB of RAM**, Python
+3.10+ with the CPU PyTorch wheel. No claim is made about faster hardware —
+`python -m apexgpt env` prints the real numbers for whatever machine it runs on,
+and `--preset auto` sizes a run to what it finds:
 
 ```
 Machine spec
-  CPU            : AMD Ryzen 3 7320U with Radeon Graphics
+  CPU            : <your CPU>
   cores          : 4 cores / 8 threads
-  GPU            : AMD Radeon(TM) Graphics
+  GPU            : <your adapter, or none>
   CUDA           : not available - no NVIDIA GPU or driver on this machine
-  usable backend : cpu (AMD64 Family 23 Model 160 Stepping 0, AuthenticAMD)
-  memory         : 7.8 GB RAM
+  usable backend : cpu (x86_64)
+  memory         : 7.9 GB RAM
   torch          : 2.14.1+cpu
-  python         : 3.14.7 (CPython)
+  python         : 3.13.5 (CPython)
 ```
 
-> ### ⚠️ Three deviations from the original spec
+> ### ⚠️ What that reference box cannot do
 >
-> **1. CUDA cannot be used here.** PyTorch CUDA kernels need an NVIDIA GPU and driver. This machine has an AMD iGPU, so `torch.cuda.is_available()` is `False` and training runs on CPU. **Every entry point still auto-selects the best available backend**, so the same code uses an NVIDIA GPU, an Intel GPU or Apple Metal with no edits — see [Hardware portability](#-hardware-portability).
+> **1. No CUDA.** PyTorch CUDA kernels need an NVIDIA GPU and driver. On a
+> machine without one, `torch.cuda.is_available()` is `False` and training runs
+> on CPU. **Every entry point still auto-selects the best available backend**, so
+> the same code uses an NVIDIA GPU, an Intel GPU or Apple Metal with no edits —
+> see [Hardware portability](#-hardware-portability).
 >
-> **2. The CPU is an AMD Ryzen 3, not an Intel i5.** All 8 logical threads are used.
+> **2. All logical threads, 4 physical cores.** The thread count is what the
+> presets and the live scan size themselves around.
 >
-> **3. On this CPU, AMP and gradient checkpointing are switched off automatically.** They are normally big wins on a GPU, but here they are a **66x penalty**:
+> **3. AMP and gradient checkpointing are switched off automatically.** They are
+> normally big wins on a GPU, but on a CPU **without native bf16** they are a
+> **66x penalty**:
 >
 > | Setting | Time/iter | Throughput |
 > |---------|-----------|-----------|
 > | bf16 autocast + gradient checkpointing | 195.1 s | 4 tok/s |
 > | plain fp32, no checkpointing | **2.95 s** | **260 tok/s** |
 >
-> Zen2 has no native bf16, so autocast emulates it, and checkpointing's recompute blocks the fused attention path. This is detected, not hard-coded: newer CPUs with native bf16 keep AMP on. Force either back on with `--amp` / `--checkpointing`.
+> A CPU without native bf16 emulates it, and checkpointing's recompute blocks
+> the fused attention path. This is detected, not hard-coded: CPUs with native
+> bf16 keep AMP on. Force either back on with `--amp` / `--checkpointing`.
 
 ---
 
 ## 💻 Hardware portability
 
-TinyLLM has no hard-coded CUDA. `core/device.py` probes the machine once and every
+ApexGPT has no hard-coded CUDA. `core/device.py` probes the machine once and every
 script follows the result.
 
 | Backend | Detected via | Precision policy | Checkpointing |
@@ -108,9 +112,9 @@ script follows the result.
 | `cpu` | always present | bf16 autocast **only if native**, else fp32 | off |
 
 ```bash
-python -m tinyllm setup --backend auto   # detect backend, print the exact pip plan
-python -m tinyllm setup --install        # detect backend, then install
-python -m tinyllm doctor                 # report every backend, RAM, VRAM, threads
+python -m apexgpt setup --backend auto   # detect backend, print the exact pip plan
+python -m apexgpt setup --install        # detect backend, then install
+python -m apexgpt doctor                 # report every backend, RAM, VRAM, threads
 ```
 
 `setup` picks the wheel index that matches your hardware (cu124, cu121, rocm6.2,
@@ -120,13 +124,13 @@ expressed as one pinned version, **`torch` is deliberately unpinned** in
 
 | Machine | Command |
 |---------|---------|
-| NVIDIA (any CUDA) | `python -m tinyllm setup --install` |
-| NVIDIA, pinned CUDA | `python -m tinyllm setup --backend cuda --cuda 121 --install` |
-| AMD ROCm (Linux) | `python -m tinyllm setup --backend rocm --rocm 6.2 --install` |
-| Intel GPU | `python -m tinyllm setup --backend xpu --install` |
-| Apple Silicon | `python -m tinyllm setup --install` (default wheel has Metal) |
-| AMD/Intel GPU on Windows | `python -m tinyllm setup --backend dml --install`, then `--device dml` |
-| CPU only | `python -m tinyllm setup --backend cpu --install` |
+| NVIDIA (any CUDA) | `python -m apexgpt setup --install` |
+| NVIDIA, pinned CUDA | `python -m apexgpt setup --backend cuda --cuda 121 --install` |
+| AMD ROCm (Linux) | `python -m apexgpt setup --backend rocm --rocm 6.2 --install` |
+| Intel GPU | `python -m apexgpt setup --backend xpu --install` |
+| Apple Silicon | `python -m apexgpt setup --install` (default wheel has Metal) |
+| AMD/Intel GPU on Windows | `python -m apexgpt setup --backend dml --install`, then `--device dml` |
+| CPU only | `python -m apexgpt setup --backend cpu --install` |
 | + Jupyter Lab | add `--notebook` |
 | + HTTP API | add `--api` |
 
@@ -134,10 +138,10 @@ Device selection is automatic (`--device auto`, the default) but never silently
 wrong: asking for a backend that is absent is a hard error, not a CPU fallback.
 
 ```bash
-python -m tinyllm train --device cuda:1     # multi-GPU index form
-python -m tinyllm train --device cpu        # force the CPU
-python -m tinyllm train --device dml        # opt into DirectML
-python -m tinyllm train --preset auto       # size the run to this machine
+python -m apexgpt train --device cuda:1     # multi-GPU index form
+python -m apexgpt train --device cpu        # force the CPU
+python -m apexgpt train --device dml        # opt into DirectML
+python -m apexgpt train --preset auto       # size the run to this machine
 ```
 
 `--preset auto` reads the detected backend, its VRAM and the core count, then
@@ -149,23 +153,23 @@ page or thrash.
 > hardware through a **ROCm build** (which reports itself as `cuda`; `doctor`
 > prints `rocm build:` to disambiguate) or, on Windows, through **DirectML**.
 > DirectML has no fused attention kernel, is usually *slower* than a full CPU
-> thread pool for training, and is therefore opt-in. For this machine's Radeon
-> iGPU the honest answer is the CPU.
+> thread pool for training, and is therefore opt-in. For a CPU-only machine the
+> honest answer is the CPU.
 
 ---
 
 ## 🔍 Environment scan
 
-One command answers "can this machine run TinyLLM, and with what settings?" — the
+One command answers "can this machine run ApexGPT, and with what settings?" — the
 same scan backs the CLI, the GUI, the API and the Jupyter kernel.
 
 ```bash
-python -m tinyllm env                 # scan, report, and apply in this process
-python -m tinyllm env --json          # machine-readable, for scripts and CI
-python -m tinyllm env --check         # exit 1 if a required package is missing
-python -m tinyllm env --export        # shell lines that carry the settings out
-python -m tinyllm env --device cuda   # resolve settings for a specific backend
-python -m tinyllm env --save env.json # keep the report next to your run
+python -m apexgpt env                 # scan, report, and apply in this process
+python -m apexgpt env --json          # machine-readable, for scripts and CI
+python -m apexgpt env --check         # exit 1 if a required package is missing
+python -m apexgpt env --export        # shell lines that carry the settings out
+python -m apexgpt env --device cuda   # resolve settings for a specific backend
+python -m apexgpt env --save env.json # keep the report next to your run
 ```
 
 It prints the machine spec, every requirement parsed from `requirements*.txt`
@@ -176,54 +180,122 @@ The same scan is a library, so scripts and notebooks resolve settings instead of
 guessing:
 
 ```python
-from tinyllm.core.environment import bootstrap
+from apexgpt.core.environment import bootstrap
 
 report, settings = bootstrap()   # scan, then apply (threads + env vars)
 print(report.to_text())         # or report.to_markdown() / report.to_json()
 print(settings.device, settings.threads, settings.amp, settings.preset)
 ```
 
-`apply_settings()` exports `TINYLLM_DEVICE`, `TINYLLM_THREADS`, `TINYLLM_PRESET`,
-`TINYLLM_AMP`, `TINYLLM_CHECKPOINTING` and `OMP_NUM_THREADS`, so a notebook
+`apply_settings()` exports `APEXGPT_DEVICE`, `APEXGPT_THREADS`, `APEXGPT_PRESET`,
+`APEXGPT_AMP`, `APEXGPT_CHECKPOINTING` and `OMP_NUM_THREADS`, so a notebook
 kernel, a `serve` process and a second terminal all inherit the same
-configuration instead of re-deriving it. `TINYLLM_DATASET` selects the corpus.
+configuration instead of re-deriving it. `APEXGPT_DATASET` selects the corpus.
+
+### 🎚️ Auto-tuning to the machine's current load
+
+The scan is not a one-off. Every run re-measures the box, and the scan reads the
+process table as well as the hardware, so a machine that is busy *right now* gets
+fewer threads and a smaller batch than an idle one:
+
+```bash
+python -m apexgpt env                        # live scan, with the busiest processes
+python -m apexgpt env --no-load-scan         # skip the measurement entirely
+python -m apexgpt env --max-cpu-percent 70   # hand back a thread earlier
+python -m apexgpt env --reserve-ram-gb 3.0   # keep more memory free
+```
+
+Two rules, both conservative and both reported in the scan:
+
+| Condition | Effect | Default |
+| --- | --- | --- |
+| CPU utilisation at or above the threshold | hand back one thread | `85%` |
+| free RAM below the reserve | halve the batch size | `1.5 GB` |
+
+```text
+[load]  cpu 12.4%  ram 1.0/7.8 GB free  processes 285  disk 84.1/465.6 GB
+        busy : python.exe 41.2%  chrome.exe 33.8%  Code.exe 22.1%
+        ram  : chrome.exe 2418.2 MB  Code.exe 1502.7 MB  Teams.exe 884.1 MB
+[load]  cpu below 85.0% and 1.0 GB free >= reserve 1.5 GB: keeping measured settings
+```
+
+Anything you set yourself is never touched by the load rules — an explicit
+override always wins, and a machine under pressure is *your* call, not the
+scan's.
+
+### 🧷 Persisted overrides
+
+Flags can be saved to `apexgpt.settings.json` so the next run starts from them:
+
+```bash
+python -m apexgpt env --threads 6 --batch-size 16 --save-settings
+python -m apexgpt env --reset-settings       # back to measured defaults
+python -m apexgpt env                        # shows each value and where it came from
+```
+
+The file starts as an all-null template, so only what you deliberately set is
+ever pinned:
+
+```json
+{
+  "threads": 6,
+  "batch_size": 16,
+  "tokenizer": "char",
+  "reserve_ram_gb": null,
+  "max_cpu_percent": null
+}
+```
+
+Precedence, highest first: **command-line flag → `apexgpt.settings.json` or
+`APEXGPT_SET_*` → live measurement.** The same values can be set through
+`APEXGPT_SET_THREADS=6` and friends for CI. The scan labels every resolved value
+with its origin:
+
+```text
+[settings] threads 6  (flag:--threads)  batch 16  (file)  tokenizer char  (env:APEXGPT_SET_TOKENIZER)
+            amp off  (auto)  reserve 1.5 GB  (auto)  max cpu 85.0%  (auto)
+```
+
+Measured readings never persist themselves: they are re-taken on every run, so a
+value written while the machine was busy cannot freeze a stale measurement into
+the config.
 
 ---
 
 ## 🚀 Quick start
 
 ```bash
-git clone https://github.com/Gethubsathvik/TinyLLM.git
-cd TinyLLM
+git clone https://github.com/Gethubsathvik/ApexGPT.git
+cd ApexGPT
 
 python -m venv .venv
 # Windows:      .venv\Scripts\activate
 # Linux/macOS:  source .venv/bin/activate
 
-python -m tinyllm setup --install            # installs torch for YOUR hardware
-python -m tinyllm env                        # scan this machine, apply its settings
-python -m tinyllm doctor                     # verify the environment
+python -m apexgpt setup --install            # installs torch for YOUR hardware
+python -m apexgpt env                        # scan this machine, apply its settings
+python -m apexgpt doctor                     # verify the environment
 
-python -m tinyllm data prepare --source shakespeare    # ~1 MB, ~4 s
-python -m tinyllm train --dataset shakespeare --preset cpu-tiny
-python -m tinyllm generate --prompt "ROMEO:" --max-new-tokens 200
+python -m apexgpt data prepare --source shakespeare    # ~1 MB, ~4 s
+python -m apexgpt train --dataset shakespeare --preset cpu-tiny
+python -m apexgpt generate --prompt "ROMEO:" --max-new-tokens 200
 
-python -m tinyllm lab --install              # Jupyter Lab, kernel preconfigured
+python -m apexgpt lab --install              # Jupyter Lab, kernel preconfigured
 ```
 
 The full-size route on a machine with room for it:
 
 ```bash
-python -m tinyllm data prepare              # Wikipedia, ~15 min, ~1.3 GB
-python -m tinyllm train --preset auto       # train, sized to this machine
-python -m tinyllm gui                       # desktop GUI
+python -m apexgpt data prepare              # Wikipedia, ~15 min, ~1.3 GB
+python -m apexgpt train --preset auto       # train, sized to this machine
+python -m apexgpt gui                       # desktop GUI
 ```
 
 All commands share one entry point:
 
 ```bash
-python -m tinyllm            # list every command
-python -m tinyllm train --help
+python -m apexgpt            # list every command
+python -m apexgpt train --help
 ```
 
 ---
@@ -237,11 +309,11 @@ python -m tinyllm train --help
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
-python -m tinyllm setup --install
-python -m tinyllm env
-python -m tinyllm data prepare --source shakespeare
-python -m tinyllm train --dataset shakespeare
-python -m tinyllm gui
+python -m apexgpt setup --install
+python -m apexgpt env
+python -m apexgpt data prepare --source shakespeare
+python -m apexgpt train --dataset shakespeare
+python -m apexgpt gui
 ```
 
 </details>
@@ -249,8 +321,8 @@ python -m tinyllm gui
 **If `Activate.ps1` is blocked** by the execution policy, use the interpreter directly — no activation needed:
 
 ```powershell
-.\.venv\Scripts\python.exe -m tinyllm env
-.\.venv\Scripts\python.exe -m tinyllm gui
+.\.venv\Scripts\python.exe -m apexgpt env
+.\.venv\Scripts\python.exe -m apexgpt gui
 ```
 
 Or unblock it once:
@@ -262,7 +334,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 **Keep the corpus off the system drive.** By default data lands in `.\data`. If `C:` is tight, point it elsewhere:
 
 ```powershell
-$env:TINYLLM_DATA_DIR = "C:\tinyllm_data"
+$env:APEXGPT_DATA_DIR = "C:\apexgpt_data"
 ```
 
 <details>
@@ -273,9 +345,9 @@ On a machine with only an AMD or Intel iGPU you will correctly get `cpu`,
 because neither has a CUDA path in PyTorch. To try DirectML:
 
 ```powershell
-python -m tinyllm setup --backend dml --install
-python -m tinyllm env                      # dml available: True
-python -m tinyllm train --device dml --preset smoke
+python -m apexgpt setup --backend dml --install
+python -m apexgpt env                      # dml available: True
+python -m apexgpt train --device dml --preset smoke
 ```
 
 </details>
@@ -291,10 +363,10 @@ sudo apt install python3-venv python3-pip     # Debian/Ubuntu
 python3 -m venv .venv
 source .venv/bin/activate
 
-python -m tinyllm setup --install              # picks cu124 / rocm / cpu for you
-python -m tinyllm env
-python -m tinyllm data prepare --source shakespeare
-python -m tinyllm train --dataset shakespeare
+python -m apexgpt setup --install              # picks cu124 / rocm / cpu for you
+python -m apexgpt env
+python -m apexgpt data prepare --source shakespeare
+python -m apexgpt train --dataset shakespeare
 ```
 
 The GUI needs Tk, which is not always installed:
@@ -311,17 +383,17 @@ Run in a headless session? `train`, `generate` and `serve` all work without a di
 
 ```bash
 # NVIDIA
-python -m tinyllm setup --backend cuda --cuda 124 --install
+python -m apexgpt setup --backend cuda --cuda 124 --install
 
 # AMD ROCm
-python -m tinyllm setup --backend rocm --rocm 6.2 --install
+python -m apexgpt setup --backend rocm --rocm 6.2 --install
 
 # Intel
-python -m tinyllm setup --backend xpu --install
+python -m apexgpt setup --backend xpu --install
 ```
 
 For ROCm, PyTorch needs the matching `rocm-smi` libraries present; verify with
-`rocm-smi` before trusting the detection. `python -m tinyllm env` then shows
+`rocm-smi` before trusting the detection. `python -m apexgpt env` then shows
 `rocm build:` instead of a CUDA build.
 
 </details>
@@ -334,13 +406,13 @@ For ROCm, PyTorch needs the matching `rocm-smi` libraries present; verify with
 python3 -m venv .venv
 source .venv/bin/activate
 
-python -m tinyllm setup --install
+python -m apexgpt setup --install
 # Tk is bundled, but you may need:
 xcode-select --install
 
-python -m tinyllm env
-python -m tinyllm data prepare --source shakespeare
-python -m tinyllm train --dataset shakespeare
+python -m apexgpt env
+python -m apexgpt data prepare --source shakespeare
+python -m apexgpt train --dataset shakespeare
 ```
 
 On **Apple Silicon** `setup` detects `mps` and installs the default wheel, which
@@ -356,17 +428,17 @@ includes Metal support. `doctor` will report `mps available: True`, and
 ## 📓 Jupyter Lab
 
 Jupyter Lab is a **fourth front end over the same services** — there is no
-notebook-only model logic. `python -m tinyllm lab` installs the notebook
+notebook-only model logic. `python -m apexgpt lab` installs the notebook
 requirements, registers a kernel that starts with the device, thread count and
 preset the scan resolved, validates the shipped notebooks, and starts the server.
 
 ```bash
-python -m tinyllm lab --install     # jupyterlab + ipykernel (requirements-notebook.txt)
-python -m tinyllm lab               # register the kernel and open Lab
-python -m tinyllm lab --register-only   # write the kernel spec, don't launch
-python -m tinyllm lab --check           # exit 1 if Lab isn't usable
-python -m tinyllm lab --list            # notebooks, kernel path, kernel env
-python -m tinyllm lab --no-browser --port 8890 --ip 0.0.0.0
+python -m apexgpt lab --install     # jupyterlab + ipykernel (requirements-notebook.txt)
+python -m apexgpt lab               # register the kernel and open Lab
+python -m apexgpt lab --register-only   # write the kernel spec, don't launch
+python -m apexgpt lab --check           # exit 1 if Lab isn't usable
+python -m apexgpt lab --list            # notebooks, kernel path, kernel env
+python -m apexgpt lab --no-browser --port 8890 --ip 0.0.0.0
 ```
 
 The registered kernel spec carries the resolved environment:
@@ -374,9 +446,9 @@ The registered kernel spec carries the resolved environment:
 ```json
 {
   "argv": [".../python.exe", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
-  "display_name": "TinyLLM (scanned environment)",
-  "name": "tinyllm",
-  "env": {"TINYLLM_DEVICE": "cpu", "OMP_NUM_THREADS": "8", "TINYLLM_PRESET": "cpu-tiny", ...}
+  "display_name": "ApexGPT (scanned environment)",
+  "name": "apexgpt",
+  "env": {"APEXGPT_DEVICE": "cpu", "OMP_NUM_THREADS": "8", "APEXGPT_PRESET": "cpu-tiny", ...}
 }
 ```
 
@@ -388,14 +460,14 @@ The registered kernel spec carries the resolved environment:
 | `01_train.ipynb` | `Config` + `train()` — the same call the CLI makes — then the loss table and curves |
 | `02_inference.ipynb` | `InferenceEngine`: one-shot generation, KV-cache comparison, temperature sweep |
 
-They are generated from `tinyllm/tools/notebook_sources.py` so the cells stay
+They are generated from `apexgpt/tools/notebook_sources.py` so the cells stay
 readable Python instead of escaped JSON:
 
 ```bash
-python -m tinyllm.tools.notebook_sources      # regenerate notebooks/
+python -m apexgpt.tools.notebook_sources      # regenerate notebooks/
 ```
 
-`python -m tinyllm lab` refuses to be quiet about damage: it validates every
+`python -m apexgpt lab` refuses to be quiet about damage: it validates every
 notebook (JSON, nbformat 4, kernel name, every code cell parses, no stored
 outputs) and reports problems before launching.
 
@@ -406,7 +478,7 @@ nothing else in the project imports them.
 
 ## 📚 Corpora
 
-`python -m tinyllm data sources` lists everything selectable. Every source ends
+`python -m apexgpt data sources` lists everything selectable. Every source ends
 as one plain UTF-8 text file, so the tokenizer, the `uint16` binaries and the
 training loop are identical no matter where the text came from.
 
@@ -423,19 +495,19 @@ training loop are identical no matter where the text came from.
 | `url:<link>` | plain text over HTTP | — | — | Any text URL |
 
 ```bash
-python -m tinyllm data sources                              # what is available
-python -m tinyllm data prepare --source shakespeare         # tiny Shakespeare
-python -m tinyllm data prepare --source wikitext --target-mb 50
-python -m tinyllm data prepare --source tinystories --target-mb 500
-python -m tinyllm data prepare --source hf:roneneldan/TinyStories
-python -m tinyllm data prepare --source kaggle:user/dataset-slug
-python -m tinyllm data prepare --source local:my_notes.txt
+python -m apexgpt data sources                              # what is available
+python -m apexgpt data prepare --source shakespeare         # tiny Shakespeare
+python -m apexgpt data prepare --source wikitext --target-mb 50
+python -m apexgpt data prepare --source tinystories --target-mb 500
+python -m apexgpt data prepare --source hf:roneneldan/TinyStories
+python -m apexgpt data prepare --source kaggle:user/dataset-slug
+python -m apexgpt data prepare --source local:my_notes.txt
 
-python -m tinyllm train --dataset shakespeare              # train on it
+python -m apexgpt train --dataset shakespeare              # train on it
 ```
 
 Each corpus gets its own directory (`data/raw/<key>/`, `data/binary/<key>/`), so
-several can be built side by side. `TINYLLM_DATASET=shakespeare` sets the default
+several can be built side by side. `APEXGPT_DATASET=shakespeare` sets the default
 for every entry point.
 
 **Hugging Face datasets are streamed, not downloaded.** `load_dataset(...,
@@ -443,32 +515,26 @@ streaming=True)` is cut off at `--target-mb`, so a 12 GB corpus is usable on a
 laptop with 8 GB of RAM, and the raw text is cached so a second run tokenizes
 offline.
 
-**Tokenization** is GPT-2 byte-level BPE, vocab **50257**, round-trip verified
-exact, written as flat `uint16` streams and split 80/20:
+**Tokenization** is GPT-2 byte-level BPE by default (vocab **50257**,
+round-trip verified exact), written as flat `uint16` streams and split 80/20.
+`--tokenizer char` switches to the 257-id byte-level vocabulary instead — see
+[🔤 Tokenizers](#-tokenizers):
 
 ```
 [tokenize] 338,025 tokens (0.34M), dtype=uint16
 [split]    80/20 -> train 270,420 tok | val 67,605 tok
 ```
 
-Useful flags: `--target-mb`, `--num-shards`, `--train-split`, `--keep-parquet`,
-`--force` (re-tokenize from the cached text), `--redownload` (refetch), and
-`--no-report`.
+Useful flags: `--tokenizer`, `--target-mb`, `--num-shards`, `--train-split`,
+`--keep-parquet`, `--force` (re-tokenize from the cached text), `--redownload`
+(refetch), and `--no-report`.
 
-### Training scripts and models from Hugging Face
+### Models and training scripts from Hugging Face
 
-TinyLLM trains its own GPT rather than loading one, but the Hub is still the
-place to go for text and for reference implementations:
-
-- **Datasets** — `python -m tinyllm data prepare --source hf:<repo_id>` works with
-  any Hub dataset that exposes a text column; `roneneldan/TinyStories` and
-  `Salesforce/wikitext` are pre-registered above.
-- **Reference training scripts** — `huggingface/transformers` examples
-  (`examples/pytorch/language-modeling/run_clm.py`) and `huggingface/trl`'s
-  `SFTTrainer` are the equivalents of `features/training/service.py` for
-  pretrained models. This repo deliberately has no dependency on either.
-- **Tokenizers** — `load_tokenizer()` uses the Hub's `gpt2` copy, caches it under
-  `data/tokenizer/`, and verifies a local copy round-trips before trusting it.
+Datasets, pretrained models and Kaggle datasets all have their own command —
+[🌐 Hugging Face & Kaggle](#-hugging-face--kaggle) covers `hub check`, `hub files`,
+`hub model`, `hub dataset` and `hub kaggle`, plus what `huggingface/transformers`
+and `huggingface/trl` are the equivalents of here.
 
 ---
 
@@ -478,11 +544,13 @@ The fastest way to see next-token prediction actually work, on any machine, with
 no GPU:
 
 ```bash
-python -m tinyllm data prepare --source shakespeare     # 1.1 MB -> 338,025 tokens
-python -m tinyllm train --dataset shakespeare \
+python -m apexgpt data prepare --source shakespeare     # 1.1 MB -> 338,025 tokens
+python -m apexgpt train --dataset shakespeare \
     --preset cpu-tiny --max-iters 400 --run-name gpt-shakespeare
-python -m tinyllm generate --checkpoint models/runs/gpt-shakespeare/checkpoint.pt \
+python -m apexgpt generate --checkpoint models/runs/gpt-shakespeare/checkpoint.pt \
     --prompt "ROMEO:" --max-new-tokens 200 --temperature 0.8
+python -m apexgpt generate --checkpoint models/runs/gpt-shakespeare/checkpoint.pt \
+    --prompt "KING RICHARD II:" --predict 5
 ```
 
 The `data prepare` report is itself the proof that the data is next-token shaped:
@@ -496,7 +564,7 @@ decode(x) = ': but now\nSome hangman must put on my shroud and lay me\n'
 decode(y) = ' but now\nSome hangman must put on my shroud and lay me\nWhere'
 ```
 
-Sample output from the `cpu-tiny` (30.0M) model after 400 steps on this Ryzen —
+Sample output from the `cpu-tiny` (30.0M) model after 400 steps —
 loss 10.82 → 5.62, so it has learned character names, verse line breaks and
 Elizabethan syntax, not yet meaning:
 
@@ -540,7 +608,7 @@ GPU produces prose.
 Three organising principles, applied together:
 
 ```
-tinyllm/
+apexgpt/
 ├── core/           cross-cutting: config, paths, device, environment, seeding
 │   └── environment.py     the one scan: spec, requirements, settings, apply
 │
@@ -581,15 +649,298 @@ any slice can be lifted out into its own deployable without touching the rest.
 **Why one service, not microservices.** Splitting data preparation and training
 into separate network processes would add ports, health checks and
 partial-failure modes to a workflow that is offline and single-user, without
-making it better. So TinyLLM ships exactly one deployable — the inference API
+making it better. So ApexGPT ships exactly one deployable — the inference API
 — and keeps every other boundary a clean in-process service interface.
+
+---
+
+## 📐 The mathematics behind ApexGPT
+
+Every formula below is either **used by this code** — with the file that
+implements it — or listed as **not used**, with the reason. Nothing is decorative.
+Where the distinction matters, the honest answer is more useful than a formula
+that looks impressive.
+
+### The one loss function this project trains
+
+Language modelling is next-token prediction. For a token sequence
+$x_1, \dots, x_T$ the model predicts each token from the ones before it, and the
+training objective is the **cross-entropy** between its predicted distribution and
+the one-hot distribution of the token that actually came next:
+
+$$
+\mathcal{L} = -\frac{1}{T}\sum_{t=1}^{T}\log p_\theta(x_t \mid x_{<t}),
+\qquad
+p_\theta(x_t \mid x_{<t}) = \mathrm{softmax}(z_t)_i \;\text{ at } i = x_t
+$$
+
+Cross-entropy is the KL divergence between the model's distribution and the
+target distribution, with the target's own entropy $H(y)$ dropped because it is a
+constant that cannot be optimised:
+
+$$
+D_{\mathrm{KL}}(P\|Q) = \sum_i P(x_i)\log\frac{P(x_i)}{Q(x_i)},
+\qquad
+\underbrace{H(P,Q)}_{\text{cross-entropy}} = \underbrace{D_{\mathrm{KL}}(P\|Q)}_{\text{optimised}} + \underbrace{H(P)}_{\text{constant}}
+$$
+
+This is the entire objective. Everything else — depth, attention, sampling — is a
+way of estimating or using $p_\theta$. It is implemented in
+`models/gpt.py` (the `targets` branch of `GPT.forward`) and reported as
+`val loss`.
+
+**How to read the numbers in this README.** The loss is in **nats**, i.e. the
+average of $-\log p$. For a fresh model that is exactly $\ln V$:
+
+| Vocabulary | Fresh model | Perfect model |
+|---|---|---|
+| GPT-2 BPE, $V = 50257$ | $\ln 50257 = 10.82$ nats/token | 0 |
+| byte-level, $V = 257$ | $\ln 257 = 5.55$ nats/char | 0 |
+
+So a byte-level model can reach a lower *number* than a BPE model and still be
+worse at text. The comparable quantity is nats **per character**
+(`nats/token ÷ chars-per-token`), which is why the tokenizer comparison in
+[🔤 Tokenizers](#-tokenizers) is decided on 1.702 vs 2.461 nats/char rather than
+on 5.6159 vs 2.4614.
+
+### Attention
+
+Scaled dot-product attention, one head:
+
+$$
+\mathrm{Attention}(Q,K,V) = \mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V,
+\qquad Q = XW_Q,\; K = XW_K,\; V = XW_V
+$$
+
+The $1/\sqrt{d_k}$ factor is what keeps the softmax out of its saturating region:
+if the entries of $q\cdot k$ have variance $\propto d_k$, the logits' variance
+grows with $d_k$ too, `softmax` becomes a hard argmax, and the gradient vanishes.
+Dividing by $\sqrt{d_k}$ restores unit variance. Implemented in
+`models/gpt.py::CausalSelfAttention` via
+`torch.nn.functional.scaled_dot_product_attention` with a causal mask, so the
+mask, the scaling and the softmax are the fused kernel's, not a re-implementation.
+
+### The neuron and its activations
+
+Every parameter in the network enters through an affine map, and the network is a
+stack of these with a nonlinearity between them — without the nonlinearity,
+stacking $L$ layers is algebraically the same as one layer:
+
+$$
+z = Wx + b,
+\qquad
+\text{ReLU}(z) = \max(0, z),
+\qquad
+\text{GELU}(z) = z\,\Phi(z),
+\qquad
+\Phi(z) = \frac{1}{\sqrt{2\pi}}\int_{-\infty}^{z} e^{-t^2/2}\,dt
+$$
+
+ApexGPT's MLP is `GELU → Linear(4d) → Linear(d)` (`models/gpt.py::MLP`), and
+`GELU` is used because it is smooth, which matters when the network is deep. The
+positional and token embeddings are the exception: those are pure affine maps,
+with no activation in between, because a lookup has nothing to be nonlinear.
+
+### Normalisation
+
+LayerNorm standardises each token's feature vector across the hidden dimension,
+then rescales it so the network can still express whatever magnitude it needs:
+
+$$
+\mu = \frac{1}{d}\sum_{i=1}^{d} z_i,
+\qquad
+\sigma^2 = \frac{1}{d}\sum_{i=1}^{d}(z_i - \mu)^2,
+\qquad
+\mathrm{LayerNorm}(z) = \gamma \odot \frac{z-\mu}{\sqrt{\sigma^2+\epsilon}} + \beta
+$$
+
+The statistics are taken over features, never over the batch, which is why a
+LayerNorm network is independent of batch size. The blocks here are
+**pre-LayerNorm** ($x + \mathrm{Attn}(\mathrm{LN}(x))$), which keeps the residual
+path an identity and is what makes a 12-layer stack trainable at this scale.
+Implemented in `models/gpt.py` as `LayerNorm`.
+
+### Optimisation
+
+Gradient descent, and the two refinements this trainer uses:
+
+$$
+\theta_{t+1} = \theta_t - \alpha\,\nabla_\theta \mathcal{L}(\theta_t)
+$$
+
+$$
+\underbrace{\hat{m}_t = \beta_1 \hat{m}_{t-1} + (1-\beta_1)\,g_t}_{\text{momentum}},
+\qquad
+\underbrace{\hat{v}_t = \beta_2 \hat{v}_{t-1} + (1-\beta_2)\,g_t^2}_{\text{second moment}}
+$$
+
+$$
+\theta_{t+1} = \theta_t - \alpha\left(\frac{\hat{m}_t}{1-\beta_1^t}\right)\Bigg/\left(\sqrt{\frac{\hat{v}_t}{1-\beta_2^t}} + \epsilon\right)
+$$
+
+That is AdamW's update, where $g_t = \nabla_\theta\mathcal{L}$ and
+$\beta_1 = 0.9$, $\beta_2 = 0.999$. Dividing by $\sqrt{\hat v_t}$ makes the step
+size roughly $\alpha$ regardless of gradient magnitude, and the bias correction
+$m/(1-\beta^t)$ fixes the fact that $\hat m_t$ and $\hat v_t$ start at zero and
+would otherwise bias the first steps towards zero. **Decoupled** weight decay
+(`AdamW`) applies the penalty to the weights directly instead of folding it into
+the gradient, which decouples it from the adaptive rescaling.
+
+Three more pieces of the training loop:
+
+| | Formula | Where |
+|---|---|---|
+| gradient clipping | $\min(1,\ \tau/\lVert g\rVert_2)\cdot g$ | bounds a single bad batch |
+| warmup + cosine decay | $\eta_t = \eta_{min} + \tfrac12(\eta_{max}-\eta_{min})(1+\cos(\pi t/T))$ | the `lr` column in every loss table |
+| backpropagation | $\dfrac{\partial \mathcal{L}}{\partial w} = \dfrac{\partial \mathcal{L}}{\partial a}\cdot\dfrac{\partial a}{\partial w}$, applied by the chain rule backwards through every op | `loss.backward()` |
+
+### Sampling, and why temperature is a division
+
+At generation time the logits are turned into a distribution and sampled from,
+after three optional filters — `models/sampling.py`:
+
+$$
+p_i = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}
+$$
+
+Raising the temperature $T > 1$ **flattens** the distribution (logits are divided,
+so differences shrink); $T < 1$ sharpens it; $T = 0$ is greedy decoding and takes
+`argmax`. `top_k` keeps the $k$ largest logits, `top_p` keeps the smallest set
+whose cumulative probability reaches $p$ (nucleus sampling), and
+`repetition_penalty` divides positive logits / multiplies negative ones for tokens
+already generated. `--predict` bypasses all of it and shows the untouched
+distribution from which sampling would have drawn.
+
+**Entropy** of that distribution, in nats, is the diagnostic used by `--predict`:
+
+$$
+H(p) = -\sum_i p_i \log p_i,
+\qquad 0 \le H(p) \le \ln V
+$$
+
+$H = \ln V$ is uniform guessing; $H = 0$ is a single forced token. The measured
+6.632 nats against $\ln 50257 = 10.825$ says the model is far from uniform but
+far from confident.
+
+### Evaluation metrics, and which ones apply
+
+Perplexity is the exponentiated loss, and it is the one metric worth quoting for
+a language model:
+
+$$
+\mathrm{PPL} = e^{\mathcal{L}}
+\quad\Rightarrow\quad
+\text{BPE val } e^{5.6159} = 275,\qquad
+\text{byte-level val } e^{2.4614} = 11.7
+$$
+
+Those are **not comparable** across tokenizers — 275 sounds 20× worse than 11.7
+while being the better model, because each covers a different amount of text.
+Per character, the BPE model's perplexity is $e^{1.702} = 5.48$ against the
+byte-level model's $e^{2.4614} = 11.7$.
+
+Classification metrics are **not** what a language model is evaluated with — this
+project has no labels and no decision threshold, so there is no confusion matrix
+to build one from. For completeness, and because the question always comes up:
+
+$$
+\mathrm{Accuracy} = \frac{TP+TN}{TP+TN+FP+FN},
+\qquad
+\mathrm{Precision} = \frac{TP}{TP+FP},
+\qquad
+\mathrm{Recall} = \frac{TP}{TP+FN}
+$$
+
+$$
+F_1 = \frac{2\cdot\mathrm{Precision}\cdot\mathrm{Recall}}{\mathrm{Precision}+\mathrm{Recall}}
+$$
+
+$F_1$ is their harmonic mean, so it collapses when either one does — which is the
+property you want when both matter. The confusion matrix itself is:
+
+$$
+C = \begin{bmatrix} TN & FP \\ FN & TP \end{bmatrix}
+$$
+
+### Descriptive statistics behind the environment scan
+
+The scan that sizes a run to the machine (`core/system.py`, `core/environment.py`)
+is built from these:
+
+$$
+\mu = \frac{1}{n}\sum_{i=1}^{n} x_i,
+\qquad
+\sigma^2 = \frac{1}{n}\sum_{i=1}^{n}(x_i-\mu)^2,
+\qquad
+\sigma = \sqrt{\sigma^2}
+$$
+
+$$
+\mathrm{Cov}(X,Y) = \frac{1}{n}\sum_{i=1}^{n}(x_i-\mu_X)(y_i-\mu_Y),
+\qquad
+\rho = \frac{\mathrm{Cov}(X,Y)}{\sigma_X\,\sigma_Y} \in [-1, 1]
+$$
+
+CPU utilisation is a *ratio of differences*, because the counters are cumulative
+since boot — comparing two samples, not two absolutes:
+
+$$
+\text{util} = 100\left(1 - \frac{\Delta\,\text{idle}}{\Delta\,\text{idle} + \Delta\,\text{kernel} + \Delta\,\text{user}}\right)
+$$
+
+That is why `_split_cpu_line` exists, and why the scan reports the load average
+$\left(\frac{1}{5m}\sum_{i} D_i,\ \frac{1}{15m}\sum_{i} D_i,\ \frac{1}{60m}\sum_{i} D_i\right)$
+where $D_i$ is the number of runnable processes — the same quantity the live
+scan compares against `DEFAULT_MAX_CPU_PERCENT = 85.0`.
+
+### Deliberately not implemented
+
+Naming these is more useful than quietly implying support:
+
+| Method | Formula | Why not here |
+|---|---|---|
+| Linear regression | $y = \beta_0 + \beta_1 x$ | nothing here is a continuous target |
+| Cost function (MSE) | $J(\theta)=\frac{1}{n}\sum_i (y_i-\hat y_i)^2$ | regression loss; language modelling uses cross-entropy |
+| Logistic regression | $p = \sigma(z) = \frac{1}{1+e^{-z}}$, $\ \mathcal{L}=-\frac1n\sum_i\big[y_i\log p_i + (1-y_i)\log(1-p_i)\big]$ | binary classification — a language model is a softmax over 50,257 classes, which *contains* this as the $K=2$ case |
+| Softmax (multiclass) | $p_i = \dfrac{e^{z_i}}{\sum_j e^{z_j}}$ | **used** — `models/sampling.py`, and it *is* the model's output layer |
+| Naive Bayes | $P(y\mid x) = \dfrac{P(x\mid y)\,P(y)}{P(x)}$ | conditional independence is false for language |
+| K-Means | $\arg\min_c \lVert x_i - \mu_{c_i}\rVert_2^2$ | no clustering step; the tokenizer vocabulary is not learned by clustering |
+| SVM | $f(x) = w^\top x + b$, maximise margin subject to $y_i f(x_i) \ge 1$ | no support vectors, no kernel trick |
+| L1 / L2 regularisation | $\lambda\sum_i\lvert\beta_i\rvert$ / $\lambda\sum_i \beta_i^2$ | **L2 via AdamW, weight decay only** — no L1, no sparse weights |
+| Bias–variance | $\mathbb{E}[(y-\hat f(x))^2] = \mathrm{Bias}^2[\hat f] + \mathrm{Var}[\hat f] + \sigma^2$ | the decomposition is descriptive, not something a run reports |
+| Gradient boosting (XGBoost, LightGBM) | $\hat y = \sum_{k} f_k(x)$, $f_k$ fits the residual gradient | trees do not tokenise; a 123.8M-parameter transformer is the model here. `sklearn` is not a dependency |
+| Vector database | embeddings + ANN index (HNSW, IVF) | there is no retrieval step: the context is a fixed-size window of the corpus, not a search over a store |
+| Mutual information | $I(X;Y) = H(X) - H(Y\mid X) = H(X)+H(Y)-H(X,Y)$ | meaningful, but nothing in this repo measures it; `--predict`'s entropy is the one place it would come from |
+| KL divergence | $D_{\mathrm{KL}}(P\|Q)=\sum_i P_i\log\frac{P_i}{Q_i}$ | **used** — it *is* the training loss, cross-entropy minus the target entropy (see above) |
+
+Fine-tuning, reinforcement learning from human feedback, LoRA and quantisation
+are equally absent, and saying so is more useful than a stub: a 30M-parameter
+model trained on one corpus is not a base model anybody can fine-tune
+meaningfully. `--resume` continues *this* trainer's own checkpoints.
+
+### Cost of one forward pass
+
+The `full` preset's estimated FLOPs per token, and the reason the presets differ
+so much in wall-clock:
+
+$$
+\mathrm{FLOPs} \approx 6N + 12\,LHd^2T
+\qquad
+(6N:\ \text{matmul},\;\; 12LHd^2T:\ \text{attention scores and values})
+$$
+
+with $N$ parameters, $L$ layers, $H$ heads, $d$ hidden, $T$ tokens. The second
+term is quadratic in sequence length, which is exactly what the KV cache exists
+to avoid: generating token $T+1$ with a cache costs one forward pass over the new
+token only, not over the whole window. `models/builder.py::estimate_flops`
+implements it.
 
 ---
 
 ## 🤖 Model
 
 ```bash
-python -m tinyllm train --preset full --summary-only
+python -m apexgpt train --preset full --summary-only
 ```
 
 Everything is hand-written: packed QKV projection, `scaled_dot_product_attention`,
@@ -637,12 +988,70 @@ cached decoding matches a full forward pass to `1e-4`.
 
 ---
 
+## 🔤 Tokenizers
+
+Tiny Shakespeare has its own vocabulary: no merge table, no download, no
+`<unk>`, and nothing that can be thrown off by a character the corpus never
+contained. The byte-level tokenizer maps each byte to an id `0–255` and uses
+`256` for `<|endoftext|>`, so **every** input is representable — emoji, other
+scripts, and a multi-byte character sliced in half at the block edge.
+
+```bash
+python -m apexgpt prepare --dataset shakespeare --tokenizer char
+python -m apexgpt train  --dataset shakespeare --tokenizer char --preset cpu-tiny --max-iters 400
+python -m apexgpt generate --checkpoint models/runs/gpt-shakespeare-char/checkpoint.pt --prompt "ROMEO:"
+```
+
+```python
+from apexgpt.features.data.tokenizers import load_tokenizer, spec_for
+
+spec = spec_for("char")            # 257 ids, eos 256, no merges
+tok = load_tokenizer("char")
+tok.decode([ord("R"), ord("O")])   # "RO"
+```
+
+The tokenizer is part of the run, not a global choice: the prepared corpus stores
+its spec in `corpus.json`, the checkpoint records the tokenizer and its vocab
+size in its metadata, and `generate` decodes with whatever the checkpoint was
+trained on — loading a `char` checkpoint never silently runs it through GPT-2
+BPE.
+
+### Measured: GPT-2 BPE vs. byte-level, `cpu-tiny`, 400 steps
+
+| | GPT-2 BPE (`gpt2`) | Byte-level (`char`) |
+| --- | --- | --- |
+| vocabulary | 50,257 | **257** |
+| tokens for the corpus | 338,025 | **1,115,394** |
+| characters per token | 3.30 | 1.00 |
+| characters actually observed | — | 65 |
+| parameters (`cpu-tiny`) | 30.0M | **10.8M** |
+| speed on 8 CPU threads | ~230 tok/s | **~500 tok/s** |
+| characters seen in 400 steps | 1.01M | 0.31M |
+| validation loss | 5.6159 nats/token | 2.4614 nats/char |
+| **validation loss per character** | **1.702 nats/char** | 2.4614 nats/char |
+| train / validation split | 268,364 / 69,661 | 892,315 / 223,079 |
+
+The two losses are only comparable once they are divided by characters, which is
+why the table ends in nats/char. BPE stays the default: at equal steps each of
+its sequences covers 3.3× more text, and that outweighs its size. `char` is
+worth choosing when you want the smaller model and the faster iteration — 3×
+fewer parameters, because the embedding drops from 19.3M to 0.10M, and ~2×
+throughput — and its output is visibly rougher at the same step count:
+
+```text
+ROMEO:
+Wit lllll he, wif me he thome
+Fou ase dseis y thers omyongo illll dirold nd are he hey it te mere s
+```
+
+---
+
 ## 🎓 Training
 
 ```bash
-python -m tinyllm train --preset cpu-tiny --max-iters 600
-python -m tinyllm train --show-history gpt-shakespeare
-python -m tinyllm train --dataset shakespeare --resume models/runs/gpt-shakespeare/checkpoint.pt --max-iters 800
+python -m apexgpt train --preset cpu-tiny --max-iters 600
+python -m apexgpt train --show-history gpt-shakespeare
+python -m apexgpt train --dataset shakespeare --resume models/runs/gpt-shakespeare/checkpoint.pt --max-iters 800
 ```
 
 Forward → cross-entropy next-token loss → backward → gradient clipping → AdamW
@@ -694,10 +1103,10 @@ this budget: coherent output needs the `full` preset on an NVIDIA GPU.
 ## 💬 Inference
 
 ```bash
-python -m tinyllm generate --prompt "The history of the city is"
-python -m tinyllm generate --prompt "Once upon a time" \
+python -m apexgpt generate --prompt "The history of the city is"
+python -m apexgpt generate --prompt "Once upon a time" \
     --temperature 0.7 --top-k 40 --top-p 0.95 --max-new-tokens 300
-python -m tinyllm generate --interactive
+python -m apexgpt generate --interactive
 ```
 
 Interactive commands: `:t <temp>`, `:k <top-k>`, `:p <top-p>`, `:n <tokens>`,
@@ -705,12 +1114,167 @@ Interactive commands: `:t <temp>`, `:k <top-k>`, `:p <top-p>`, `:n <tokens>`,
 
 All four front ends share `models/sampling.py`, so they behave identically.
 
+### 🔮 Predict the next word, with its probability
+
+Sampling answers "what did the model happen to write". `--predict` answers the
+other question — *what did the model expect?* — by keeping the distribution
+instead of sampling it and showing the ranked candidates:
+
+```bash
+python -m apexgpt generate --prompt "The history of the city is" --predict 8
+python -m apexgpt generate --prompt "To be, or not" --next-word
+```
+
+```text
+[predict] next token after 'The history of the city is'
+    1. id=11     p= 0.0917 logp= -2.39  ,          ##########
+    2. id=198    p= 0.0487 logp= -3.02  \n          ##
+    3. id=257    p= 0.0391 logp= -3.24  \u0020a     ##
+    4. id=616    p= 0.0218 logp= -3.83  \u0020my    #
+    5. id=11     p= 0.0163 logp= -4.12  ,           #
+    6. id=326    p= 0.0148 logp= -4.21  \u0020that  #
+    7. id=465    p= 0.0135 logp= -4.31  \u0020his   #
+    8. id=534    p= 0.0125 logp= -4.39  \u0020your
+        top-8 hold 0.2400 of the mass; entropy 6.632 nats (uniform would be 10.825 over 50,257 tokens)
+```
+
+Read the last line as the health check it is: a uniform model over 50,257 tokens
+has entropy `ln(50257) = 10.825` nats. **6.632 nats means the model has real
+structure and is not guessing** — while the top 8 candidates holding only 24% of
+the mass says the same thing from the other side. Whitespace is escaped
+(`\u0020`, `\n`) because a column of blank-looking rows cannot be read or
+copy-pasted.
+
+The same model is confident where the corpus makes it confident, and the table
+shows it — a character name expects a line break:
+
+```text
+[predict] next token after 'KING RICHARD II:'
+    1. id=198    p= 0.9346 logp= -0.068  \n          #####################################
+    2. id=314    p= 0.0054 logp= -5.223  \u0020I
+    3. id=290    p= 0.0022 logp= -6.129  \u0020and
+    4. id=475    p= 0.0015 logp= -6.482  \u0020but
+    5. id=644    p= 0.0013 logp= -6.671  \u0020what
+        top-5 hold 0.9449 of the mass; entropy 0.650 nats (uniform would be 10.825 over 50,257 tokens)
+```
+
+0.650 nats against 10.825 — the model has learned the shape of the corpus. The
+`logp` column is the same quantity the training loop minimises, per candidate.
+
+The same numbers are a library call and a REST field:
+
+```python
+from apexgpt.features.inference import InferenceEngine
+
+engine = InferenceEngine(device="cpu").load()
+rows = engine.predict_next("The history of the city is", top_k=5)
+rows[0].text, rows[0].probability, rows[0].logprob
+engine.predict_next_text("To be, or not")     # just the single best token
+rows, entropy = engine.predict_next_with_entropy("To be, or not")
+```
+
+`--interactive` prints the same table before every completion.
+
+---
+
+## 🌐 Hugging Face & Kaggle
+
+```bash
+python -m apexgpt hub check                              # what this machine can do
+python -m apexgpt hub files gpt2                         # what is in a repo
+python -m apexgpt hub dataset Salesforce/wikitext        # download dataset files
+python -m apexgpt hub model gpt2 --predict "Once upon a time"
+python -m apexgpt hub kaggle inria/tiny-imagenet         # download a Kaggle dataset
+```
+
+### 🎯 Run a pretrained model and ask it the same question
+
+`hub model <repo_id> --predict "<prompt>"` downloads the repo, loads it with
+`transformers`, and prints the next-token distribution — the identical output
+format `--predict` gives for a model trained here, so the two are directly
+comparable:
+
+```bash
+python -m apexgpt hub model gpt2 \
+    --predict "Once upon a time" --top-k 8 --max-new-tokens 200 --device auto
+```
+
+Two details worth knowing. First, `hub model` fetches **only** the config, the
+tokenizer and the weights (`*.json`, `*.txt`, `*.safetensors`, `*.bin`); the
+`gpt2` repo also ships the same model as ONNX, TensorFlow, Flax and Rust, which
+is 3.5 GB of files PyTorch never reads. `--allow` overrides the list. Second,
+`transformers` is imported lazily inside the call, so a machine that only trains
+ApexGPT never loads it.
+
+> If a download fails with a **404 on `xet-read-token`**, the xet storage
+> backend cannot authenticate anonymously on that network. Retry with
+> `HF_HUB_DISABLE_XET=1` set, or log in with `HF_TOKEN`. Both are surfaced by
+> `hub check`.
+
+### 📥 Datasets
+
+```bash
+python -m apexgpt data prepare --source hf:roneneldan/TinyStories   # streamed, cut at --target-mb
+python -m apexgpt data prepare --source kaggle:user/dataset-slug    # Kaggle credentials required
+python -m apexgpt hub dataset Salesforce/wikitext --allow '*.parquet'
+python -m apexgpt hub kaggle user/dataset-slug
+```
+
+`hub dataset` and `hub kaggle` put the raw files on disk under `data/hub/`
+without converting them, for when the parquet or JSONL layout matters. `data
+prepare` is the other path: it ends with one plain UTF-8 text file, which is what
+the tokenizer and the `uint16` binaries are built from. Both land in the same
+`data/raw/<key>/` convention afterwards.
+
+**Kaggle credentials are not a pip package.** Create an API token at
+*Kaggle → Settings → API* and save it as `~/.kaggle/kaggle.json`
+(`%USERPROFILE%\.kaggle\kaggle.json` on Windows), then:
+
+```bash
+python -m apexgpt setup --hub --install    # kagglehub, or use the kaggle CLI
+python -m apexgpt hub check                # confirms client + credentials
+```
+
+`hub check` prints the whole picture in one screen — Hub client, `transformers`,
+`datasets`, Kaggle client, Kaggle credentials, token present, and the two
+directories downloads land in:
+
+```text
+  models   : .../data/hub/models
+  datasets : .../data/hub/datasets
+
+  [ok] download Hugging Face datasets             public repos need no token; private ones need HF_TOKEN
+  [ok] stream Hugging Face datasets into a corpus python -m apexgpt data prepare --source hf:<repo_id>
+  [ok] download and run a Hugging Face model      pip install -r requirements-hub.txt
+  [--] Hub authentication                         huggingface-cli login, or set HF_TOKEN
+  [--] download Kaggle datasets                   pip install kagglehub (or the kaggle CLI) and put kaggle.json in ~/.kaggle/
+```
+
+### 🧑‍🏫 Reference training scripts
+
+ApexGPT trains its own GPT rather than loading one, so the Hub's training scripts
+are the equivalent of `features/training/service.py` for pretrained models —
+read them, do not depend on them:
+
+| Upstream | Script | Equivalent here |
+|----------|--------|-----------------|
+| `huggingface/transformers` | `examples/pytorch/language-modeling/run_clm.py` | `features/training/service.py` — corpus → batches → AdamW → checkpoints |
+| `huggingface/trl` | `SFTTrainer` | supervised fine-tuning of a pretrained checkpoint; the same loop with a different data source |
+| `huggingface/tokenizers` | `Tokenizer` training | `features/data/tokenizers.py` for the byte-level vocabulary |
+
+Fine-tuning a released checkpoint is `--resume`, which restores the model, the
+optimizer and the step count rather than starting over:
+
+```bash
+python -m apexgpt train --dataset shakespeare --resume <checkpoint.pt> --max-iters 800
+```
+
 ---
 
 ## 🖥️ GUI
 
 ```bash
-python -m tinyllm gui
+python -m apexgpt gui
 ```
 
 A dark-themed Tk window: prompt box, **real-time token-by-token streaming** on
@@ -726,11 +1290,11 @@ top-k, top-p, max tokens, seed and repetition penalty, a KV-cache toggle, a
 
 ## 🌐 HTTP API
 
-Optional, and the one part of TinyLLM that runs as its own process.
+Optional, and the one part of ApexGPT that runs as its own process.
 
 ```bash
 pip install -r requirements-api.txt
-python -m tinyllm serve --host 0.0.0.0 --port 8000
+python -m apexgpt serve --host 0.0.0.0 --port 8000
 ```
 
 | Endpoint | Method | Purpose |
@@ -764,7 +1328,7 @@ against that API work unmodified:
 ```bash
 curl -X POST http://localhost:8000/v1/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"tinyllm","prompt":"hello","max_tokens":20}'
+  -d '{"model":"apexgpt","prompt":"hello","max_tokens":20}'
 ```
 
 ```json
@@ -773,12 +1337,12 @@ curl -X POST http://localhost:8000/v1/completions \
   "object": "text_completion",
   "choices": [{"index": 0, "text": "...", "logprobs": null, "finish_reason": "length"}],
   "usage": {"prompt_tokens": 2, "completion_tokens": 20, "total_tokens": 22},
-  "tinyllm": {"elapsed_s": 0.31, "device": "cuda:0", "...": "..."}
+  "apexgpt": {"elapsed_s": 0.31, "device": "cuda:0", "...": "..."}
 }
 ```
 
 > `stream: true` is refused there with a `400` pointing at `/stream`: OpenAI
-> streams token objects, TinyLLM streams bare text, and faking that shape would
+> streams token objects, ApexGPT streams bare text, and faking that shape would
 > break more clients than it would serve.
 
 This is what makes the project usable from a phone or another program without
@@ -797,9 +1361,9 @@ Being straight about this: **PyTorch training on Android is not a realistic targ
 
 ```bash
 pkg install python clang libjpeg-turbo
-python -m tinyllm setup --install          # Termux has no GPU, so this picks cpu
-python -m tinyllm env
-python -m tinyllm train --dataset shakespeare --preset smoke
+python -m apexgpt setup --install          # Termux has no GPU, so this picks cpu
+python -m apexgpt env
+python -m apexgpt train --dataset shakespeare --preset smoke
 ```
 
 Expect CPU-only training on a phone to be roughly **20-50x slower** than a laptop — and phone SoCs are usually ARM with far less memory bandwidth. Practical for the CLI, the test suite and inference; not for real training runs. tiny Shakespeare is the corpus to use here: 1.1 MB instead of 1.3 GB.
@@ -809,7 +1373,7 @@ Expect CPU-only training on a phone to be roughly **20-50x slower** than a lapto
 Run `serve` on your PC, bind it to the LAN, and call it from any phone browser or app:
 
 ```bash
-python -m tinyllm serve --host 0.0.0.0 --port 8000
+python -m apexgpt serve --host 0.0.0.0 --port 8000
 ```
 
 ```bash
@@ -824,7 +1388,7 @@ and set the model name to anything:
 ```bash
 curl -X POST http://192.168.1.50:8000/v1/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"tinyllm","prompt":"hello","max_tokens":20}'
+  -d '{"model":"apexgpt","prompt":"hello","max_tokens":20}'
 ```
 
 > **Do not expose this to the internet as-is.** There is no authentication,
@@ -850,7 +1414,10 @@ python -m pytest tests -q
 | `tests/test_data_and_inference.py` | tokenize/split/batch, engine streaming |
 | `tests/test_data_sources.py` | corpus registry, URL/local/HF/Kaggle fetch, conversions, per-corpus paths |
 | `tests/test_device.py` | backend probes, precision policy, presets, wheel indexes |
-| `tests/test_environment.py` | the scan: spec, requirements, settings, shell export, CLI |
+| `tests/test_system.py` | live CPU/RAM/disk/process probes, their fallbacks, threshold arithmetic |
+| `tests/test_environment.py` | the scan: spec, requirements, settings, overrides, load scan, shell export, CLI |
+| `tests/test_tokenizers.py` | byte-level vocabulary, corpus specs, checkpoint metadata, per-tokenizer decoding |
+| `tests/test_predict_and_hub.py` | next-token distribution and entropy, prediction CLI, Hub/Kaggle capability, `--allow` plumbing |
 | `tests/test_lab.py` | kernel spec, notebook integrity, Lab CLI, a notebook executed in a real kernel |
 | `tests/test_package.py` | every module imports, CLI wiring, layout |
 | `tests/test_gui.py` | real Tk window, streaming, Stop button |
@@ -858,7 +1425,8 @@ python -m pytest tests -q
 
 The tests that matter most are the ones that catch **silent** bugs: that a
 causal mask leaks no future tokens, that cached decoding matches a full forward
-pass, and that gradient checkpointing is bit-identical to the plain path.
+pass, that gradient checkpointing is bit-identical to the plain path, and that a
+`char` checkpoint is never decoded with GPT-2 BPE.
 
 The GUI, API and Jupyter suites skip themselves automatically when Tk, FastAPI
 or jupyterlab is unavailable, so the suite passes headless and without the
@@ -869,15 +1437,16 @@ notebook extras.
 ## 📁 Project layout
 
 ```
-TinyLLM/
-├── tinyllm/
+ApexGPT/
+├── apexgpt/
 │   ├── __main__.py            # single command dispatcher
-│   ├── core/                   # config, paths, device, environment, seeding
+│   ├── core/                   # config, paths, device, environment, system scan, text, seeding
 │   ├── models/                 # M: GPT architecture, builder, sampling
 │   ├── features/
-│   │   ├── data/               # service.py + cli.py + sources.py
+│   │   ├── data/               # service.py + cli.py + sources.py + tokenizers.py
 │   │   ├── training/           # service.py + cli.py
-│   │   └── inference/          # service.py + cli.py + gui.py
+│   │   ├── inference/          # service.py + cli.py + gui.py
+│   │   └── hub/                # service.py + cli.py: Hugging Face / Kaggle
 │   ├── api/server.py           # optional FastAPI service
 │   └── tools/                  # setup, env, doctor, lab, notebook_sources
 ├── notebooks/                  # generated .ipynb: environment, train, inference
@@ -885,8 +1454,11 @@ TinyLLM/
 ├── models/runs/<name>/         # checkpoint.pt, history.json, loss_curves.png
 ├── data/raw/<corpus>/          # cached corpus text
 ├── data/binary/<corpus>/       # train.bin, val.bin (uint16)
+├── data/hub/                   # Hugging Face / Kaggle downloads
+├── apexgpt.settings.json       # persisted overrides (written by --save-settings)
 ├── requirements.txt
 ├── requirements-api.txt
+├── requirements-hub.txt
 ├── requirements-notebook.txt
 └── README.md
 ```
@@ -912,10 +1484,15 @@ Notable defects caught during the audit and regression-tested:
 | Pydantic models defined inside a factory | unresolved forward refs, schema generation crashed |
 | Test-artifact checkpoints shadowed real runs | `generate` silently loaded the wrong model |
 | GUI read a Tk variable from a worker thread | `RuntimeError: main thread is not in main loop` |
-| `python -m tinyllm data prepare` — documented in the README but not implemented | every corpus command in the docs errored out |
+| `python -m apexgpt data prepare` — documented in the README but not implemented | every corpus command in the docs errored out |
 | ROCm index built as `cu124rocm`, XPU index missing the `download.` host | both wheel installs 404'd |
 | Assigning `DataConfig.dataset` left `binary_dir` alone | trained on the **previous** corpus's tokens |
 | `DataConfig` `raw_dir`/`binary_dir` could not be overridden per corpus | every corpus shared one directory |
+| Char-corpus reports decoded with GPT-2 BPE | `UnicodeEncodeError: 'charmap' codec can't encode '\ufffd'` on Windows consoles |
+| `ByteTokenizer.decode` masked ids into bytes | `<|endoftext|>` decoded to a NUL character instead of nothing |
+| Windows `System Idle Process` (pid 0) in the process table | topped the "busiest processes" list forever, at a nonsense 200% CPU |
+| `hub model --allow … --predict …` | the file patterns were dropped, so a 3.5 GB repo downloaded in full |
+| `tokenizer(...)` assumed a `BatchEncoding` | `AttributeError` on any tokenizer that returns a plain dict |
 
 ---
 
@@ -925,7 +1502,7 @@ MIT — see [LICENSE](LICENSE).
 
 ## 🔗 Links
 
-- **Repository** — https://github.com/Gethubsathvik/TinyLLM
+- **Repository** — https://github.com/Gethubsathvik/ApexGPT
 - **Dataset (default)** — [`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia) `20231101.en`
 - **Corpora** — [Tiny Shakespeare](https://github.com/karpathy/char-rnn) · [WikiText](https://huggingface.co/datasets/Salesforce/wikitext) · [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) · [OpenWebText](https://huggingface.co/datasets/Skylion007/openwebtext)
 - **Tokenizer** — GPT-2 BPE, vocab 50257

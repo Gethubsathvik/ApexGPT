@@ -21,12 +21,12 @@ PACKAGES = ("torch", "transformers", "datasets", "tokenizers",
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="tinyllm doctor",
-                                 description="Verify the TinyLLM environment")
+    ap = argparse.ArgumentParser(prog="apexgpt doctor",
+                                 description="Verify the ApexGPT environment")
     ap.parse_args(argv)
 
     print("=" * 66)
-    print("TinyLLM environment check")
+    print("ApexGPT environment check")
     print("=" * 66)
     print(f"Python        : {sys.version.split()[0]}  ({platform.python_implementation()})")
     print(f"Platform      : {platform.platform()}")
@@ -115,7 +115,7 @@ def main(argv=None) -> int:
 
     print("=" * 66)
     print("RESULT:", "environment is usable" if ok else "environment has problems")
-    print("Full scan (requirements, settings, next steps): python -m tinyllm env")
+    print("Full scan (requirements, settings, next steps): python -m apexgpt env")
     return 0 if ok else 1
 
 

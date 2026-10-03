@@ -11,8 +11,8 @@ from .service import PRESETS, show_history, train
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="tinyllm train",
-                                 description="Train the TinyLLM GPT model")
+    ap = argparse.ArgumentParser(prog="apexgpt train",
+                                 description="Train the ApexGPT GPT model")
     ap.add_argument("--preset", default="auto",
                     help="'auto' picks a preset that fits this machine, or name "
                          "one explicitly: " + ", ".join(sorted(PRESETS)))
@@ -29,9 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--log-interval", type=int, default=10)
     ap.add_argument("--run-name", default=None)
     ap.add_argument("--dataset", default=None,
-                    help="corpus to train on (default: the TINYLLM_DATASET env "
+                    help="corpus to train on (default: the APEXGPT_DATASET env "
                          "var, else wikipedia). Build it first with: "
-                         "python -m tinyllm data prepare --source <name>")
+                         "python -m apexgpt data prepare --source <name>")
     ap.add_argument("--device", default="auto",
                     help="auto | cpu | cuda | cuda:N | mps | xpu | dml")
     ap.add_argument("--num-threads", type=int, default=None)

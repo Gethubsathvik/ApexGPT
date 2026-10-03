@@ -19,9 +19,9 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
-from tinyllm.api.server import create_app
-from tinyllm.features.inference.service import InferenceEngine
-from tinyllm.models.gpt import GPT, ModelConfig
+from apexgpt.api.server import create_app
+from apexgpt.features.inference.service import InferenceEngine
+from apexgpt.models.gpt import GPT, ModelConfig
 
 TINY_MODEL = dict(n_layer=2, n_head=2, n_embd=32, block_size=32)
 
@@ -95,17 +95,17 @@ def test_stream_can_be_disabled(engine):
 # ------------------------------------------------------- openai compatibility
 def test_openai_alias_has_the_documented_shape(client):
     r = client.post("/v1/completions",
-                    json={"model": "tinyllm", "prompt": "Hi", "max_tokens": 4})
+                    json={"model": "apexgpt", "prompt": "Hi", "max_tokens": 4})
     assert r.status_code == 200
     body = r.json()
     assert body["object"] == "text_completion"
-    assert body["model"] == "tinyllm"
+    assert body["model"] == "apexgpt"
     assert len(body["choices"]) == 1
     assert body["choices"][0]["finish_reason"] == "length"
     usage = body["usage"]
     assert usage["total_tokens"] == (usage["prompt_tokens"]
                                       + usage["completion_tokens"])
-    assert body["tinyllm"]["device"] == "cpu"
+    assert body["apexgpt"]["device"] == "cpu"
 
 
 def test_openai_alias_refuses_streaming_with_a_useful_message(client):

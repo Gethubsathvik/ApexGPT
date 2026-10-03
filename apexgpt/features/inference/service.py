@@ -36,12 +36,13 @@ def find_checkpoint(explicit: str | Path | None = None) -> Path:
         return max(runs, key=lambda p: p.stat().st_mtime)
 
     raise FileNotFoundError(
-        "no checkpoint found -- train one first: python -m tinyllm train")
+        "no checkpoint found -- train one first: python -m apexgpt train")
 
 
-def load_tokenizer():
-    from ..data.service import load_tokenizer as _load
-    return _load()
+def load_tokenizer(kind: str = "gpt2"):
+    """Build the tokenizer named by ``kind`` ("gpt2" or "char")."""
+    from ..data.tokenizers import load_tokenizer as _load
+    return _load(kind)
 
 
 @dataclass
@@ -70,6 +71,33 @@ class GenerationRequest:
 
 
 @dataclass
+class Prediction:
+    """One candidate continuation, with the model's confidence in it."""
+
+    rank: int
+    token_id: int
+    text: str
+    probability: float
+    logprob: float
+
+    @property
+    def label(self) -> str:
+        """The token as something readable, never an empty string.
+
+        A space is shown as ``\\u0020`` and a newline as ``\\n``, because a
+        column of blanks is impossible to read and cannot be copy-pasted.
+        """
+        shown = (self.text.replace(" ", "\\u0020").replace("\n", "\\n")
+                 .replace("\r", "\\r").replace("\t", "\\t"))
+        return shown if shown else repr(self.text)
+
+    def as_dict(self) -> dict:
+        return {"rank": self.rank, "token_id": self.token_id, "text": self.text,
+                "probability": round(self.probability, 6),
+                "logprob": round(self.logprob, 6)}
+
+
+@dataclass
 class InferenceEngine:
     """Loads a checkpoint once and serves generation requests from it."""
     device: str = "auto"
@@ -77,6 +105,7 @@ class InferenceEngine:
     model: GPT | None = None
     payload: dict = field(default_factory=dict)
     tokenizer: object | None = None
+    tokenizer_kind: str | None = None
 
     def load(self, checkpoint: str | Path | None = None) -> "InferenceEngine":
         torch_device = get_device(self.device)
@@ -86,7 +115,17 @@ class InferenceEngine:
         self.model = model
         self.payload = payload
         self.checkpoint = path
-        self.tokenizer = load_tokenizer()
+        # The checkpoint says which tokenizer its tokens were made with. An
+        # explicit kind wins; older checkpoints have neither and were GPT-2.
+        self.tokenizer_kind = (self.tokenizer_kind
+                               or (payload.get("extra") or {}).get("tokenizer")
+                               or "gpt2")
+        recorded = (payload.get("extra") or {}).get("vocab_size")
+        if recorded is not None and int(recorded) != int(model.cfg.vocab_size):
+            raise RuntimeError(
+                f"{path.name} was saved with a {recorded}-id vocabulary but its "
+                f"model has {model.cfg.vocab_size}; refusing to decode")
+        self.tokenizer = load_tokenizer(self.tokenizer_kind)
         self._device = torch_device
         return self
 
@@ -110,6 +149,7 @@ class InferenceEngine:
             "n_head": cfg.n_head,
             "block_size": cfg.block_size,
             "vocab_size": cfg.vocab_size,
+            "tokenizer": self.tokenizer_kind,
             "step": self.payload.get("step", 0),
             "val_loss": extra.get("val_loss"),
             "device": str(self.device_obj),
@@ -128,6 +168,52 @@ class InferenceEngine:
         req.validate()
         pieces = list(self.stream(req))
         return "".join(pieces)
+
+    def predict_next(self, prompt: str, top_k: int = 10,
+                     temperature: float = 1.0) -> list[Prediction]:
+        """Rank what the model expects to come next, without sampling anything.
+
+        This is the autoregressive objective made visible: the loss the model
+        was trained on *is* the negative log-probability of the token that
+        actually followed. Returning the distribution shows that number.
+        """
+        predictions, _ = self.predict_next_with_entropy(prompt, top_k, temperature)
+        return predictions
+
+    def predict_next_with_entropy(self, prompt: str, top_k: int = 10,
+                                  temperature: float = 1.0
+                                  ) -> tuple[list[Prediction], float]:
+        """``predict_next`` plus the entropy of the whole next-token distribution.
+
+        Entropy is in nats: ``ln(vocab_size)`` is a uniform model and ``0`` is a
+        perfectly confident one, which makes it comparable across vocabularies.
+        """
+        if self.model is None:
+            raise RuntimeError("engine not loaded; call load() first")
+        from ...models.sampling import next_token_distribution
+
+        ids = self._encode_prompt(prompt)
+        with torch.no_grad():
+            logits, _ = self.model(ids[:, -self.model.cfg.block_size:])
+        token_ids, probs, entropy = next_token_distribution(
+            logits, top_k=top_k, temperature=temperature)
+        out = []
+        for rank, (token_id, prob) in enumerate(
+                zip(token_ids.tolist(), probs.tolist()), start=1):
+            prob = float(prob)
+            out.append(Prediction(
+                rank=rank,
+                token_id=int(token_id),
+                text=self.tokenizer.decode([int(token_id)]),
+                probability=prob,
+                logprob=float(torch.tensor(max(prob, 1e-12)).log()),
+            ))
+        return out, entropy
+
+    def predict_next_text(self, prompt: str, temperature: float = 1.0) -> str:
+        """The single most likely next piece of text - the next word."""
+        best = self.predict_next(prompt, top_k=1, temperature=temperature)
+        return best[0].text if best else ""
 
     def stream(self, req: GenerationRequest):
         """Yield decoded text incrementally, one token at a time."""

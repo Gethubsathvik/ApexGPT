@@ -1,15 +1,15 @@
-"""``python -m tinyllm lab`` - Jupyter Lab wired to this machine's settings.
+"""``python -m apexgpt lab`` - Jupyter Lab wired to this machine's settings.
 
 Jupyter Lab is a fourth front end for the same services the CLI drives. The
 point of this command is that the kernel is not a bare Python process: it is
 registered with the device, thread count and preset that the environment scan
 resolved, so a notebook session and a terminal run behave identically.
 
-    python -m tinyllm lab --install     # install the notebook requirements
-    python -m tinyllm lab               # register the kernel and open Lab
-    python -m tinyllm lab --list        # show what was found
-    python -m tinyllm lab --check       # exit 1 if Lab is not usable yet
-    python -m tinyllm lab --no-browser --port 8890
+    python -m apexgpt lab --install     # install the notebook requirements
+    python -m apexgpt lab               # register the kernel and open Lab
+    python -m apexgpt lab --list        # show what was found
+    python -m apexgpt lab --check       # exit 1 if Lab is not usable yet
+    python -m apexgpt lab --no-browser --port 8890
 """
 from __future__ import annotations
 
@@ -24,8 +24,8 @@ from pathlib import Path
 from ..core.environment import environment_vars, resolve_settings
 from ..core.paths import ROOT
 
-KERNEL_NAME = "tinyllm"
-KERNEL_DISPLAY_NAME = "TinyLLM (scanned environment)"
+KERNEL_NAME = "apexgpt"
+KERNEL_DISPLAY_NAME = "ApexGPT (scanned environment)"
 NOTEBOOK_DIR = ROOT / "notebooks"
 REQUIREMENTS_FILE = ROOT / "requirements-notebook.txt"
 
@@ -68,7 +68,7 @@ def kernel_dir(base: Path | None = None, name: str = KERNEL_NAME) -> Path:
     """Where the kernel spec is written.
 
     Defaults to the user data directory when Jupyter is installed, so the spec
-    is visible to JupyterLab even when TinyLLM is installed as a package
+    is visible to JupyterLab even when ApexGPT is installed as a package
     somewhere else on disk.
     """
     if base is not None:
@@ -85,7 +85,7 @@ def write_kernel_spec(settings=None, base: Path | None = None,
     """Register a kernel that starts with the resolved settings in its env.
 
     The ``env`` block is what makes the notebook session match the terminal:
-    ``TINYLLM_DEVICE``, ``TINYLLM_THREADS`` and ``OMP_NUM_THREADS`` are set
+    ``APEXGPT_DEVICE``, ``APEXGPT_THREADS`` and ``OMP_NUM_THREADS`` are set
     before the kernel's Python starts.
     """
     settings = settings or resolve_settings()
@@ -228,7 +228,7 @@ def install_requirements() -> int:
 # --------------------------------------------------------------------------- #
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        prog="tinyllm lab",
+        prog="apexgpt lab",
         description="Open Jupyter Lab with a kernel configured for this machine")
     ap.add_argument("--install", action="store_true",
                     help="install requirements-notebook.txt first")
@@ -280,7 +280,7 @@ def main(argv=None) -> int:
         return 1
 
     print("=" * 68)
-    print("TinyLLM - Jupyter Lab")
+    print("ApexGPT - Jupyter Lab")
     print("=" * 68)
     print("\n".join(_status_lines(settings)))
 
@@ -303,7 +303,7 @@ def main(argv=None) -> int:
     missing = not lab_installed() or not ipykernel_installed()
     if missing:
         print("\n[error] Jupyter Lab is not installed. Run:")
-        print("  python -m tinyllm lab --install")
+        print("  python -m apexgpt lab --install")
         return 1
 
     spec_path = write_kernel_spec(settings)

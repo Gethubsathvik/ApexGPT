@@ -1,0 +1,24 @@
+# Optional Hub extras: Kaggle datasets and pretrained models.
+#
+# Install with:  pip install -r requirements-hub.txt
+#       or:      python -m apexgpt setup --hub --install
+#
+# Nothing else in the project imports these. Training ApexGPT needs none of them,
+# and `python -m apexgpt hub check` reports what is and is not available.
+#
+# Kaggle also needs credentials, which are not a pip package: create an API
+# token at Kaggle > Settings > API and save it as
+#     ~/.kaggle/kaggle.json          (Linux/macOS)
+#     %USERPROFILE%\.kaggle\kaggle.json   (Windows)
+# `python -m apexgpt hub check` tells you when both halves are in place.
+
+# Kaggle dataset download without the kaggle CLI. The CLI works too
+# (`pip install kaggle`) and is used automatically when it is on PATH.
+kagglehub>=0.3
+
+# Running a pretrained model from the Hub (`python -m apexgpt hub model gpt2
+# --predict "..."`). Already in requirements.txt for tokenization; repeated here
+# so this file stands on its own.
+transformers>=4.44
+huggingface-hub>=0.24
+torch>=2.4

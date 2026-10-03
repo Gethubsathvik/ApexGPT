@@ -17,13 +17,16 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tinyllm.core import device as dev
-from tinyllm.core import environment as env
-from tinyllm.core.environment import (Requirement, bootstrap, collect_requirements,
-                                     cpu_name, parse_requirement_file, preset_plan,
-                                     resolve_settings, scan, shell_exports,
-                                     tool_version, write_report)
-from tinyllm.tools import env as env_cli
+from apexgpt.core import device as dev
+from apexgpt.core import environment as env
+from apexgpt.core.environment import (Requirement, SettingsOverrides, apply_settings,
+                                      bootstrap, collect_requirements, cpu_name,
+                                      load_overrides, parse_requirement_file,
+                                      preset_plan, resolve_settings, save_overrides,
+                                      scan, shell_exports, tool_version,
+                                      write_report)
+from apexgpt.core.system import SystemLoad
+from apexgpt.tools import env as env_cli
 
 ALL_GROUPS = ("core", "api", "notebook")
 
@@ -177,28 +180,28 @@ def test_cpu_settings_agree_with_the_measured_zen2_policy():
 def test_environment_vars_carry_the_settings_to_children():
     settings = resolve_settings("cpu")
     variables = env.environment_vars(settings)
-    assert variables["TINYLLM_DEVICE"] == "cpu"
-    assert variables["TINYLLM_THREADS"] == str(settings.threads)
+    assert variables["APEXGPT_DEVICE"] == "cpu"
+    assert variables["APEXGPT_THREADS"] == str(settings.threads)
     assert variables["OMP_NUM_THREADS"] == str(settings.threads)
-    assert variables["TINYLLM_PRESET"] == settings.preset
+    assert variables["APEXGPT_PRESET"] == settings.preset
     assert all(isinstance(v, str) for v in variables.values())
 
 
 def test_apply_settings_configures_threads_and_exports(monkeypatch):
     import os
-    monkeypatch.delenv("TINYLLM_DEVICE", raising=False)
+    monkeypatch.delenv("APEXGPT_DEVICE", raising=False)
     settings = resolve_settings("cpu")
     applied = env.apply_settings(settings)
     assert applied.device == "cpu"
-    assert os.environ["TINYLLM_DEVICE"] == "cpu"
+    assert os.environ["APEXGPT_DEVICE"] == "cpu"
     assert torch.get_num_threads() == settings.threads
 
 
 def test_apply_settings_can_skip_the_environment(monkeypatch):
     import os
-    monkeypatch.delenv("TINYLLM_DEVICE", raising=False)
+    monkeypatch.delenv("APEXGPT_DEVICE", raising=False)
     env.apply_settings(resolve_settings("cpu"), export=False)
-    assert "TINYLLM_DEVICE" not in os.environ
+    assert "APEXGPT_DEVICE" not in os.environ
 
 
 def test_bootstrap_scans_and_applies_in_one_call():
@@ -245,9 +248,9 @@ def test_write_report_persists_json(tmp_path):
 
 # ------------------------------------------------------------------ shells
 @pytest.mark.parametrize("shell,prefix", [
-    ("bash", "export TINYLLM_DEVICE="),
-    ("cmd", "set TINYLLM_DEVICE="),
-    ("powershell", '$env:TINYLLM_DEVICE = "'),
+    ("bash", "export APEXGPT_DEVICE="),
+    ("cmd", "set APEXGPT_DEVICE="),
+    ("powershell", '$env:APEXGPT_DEVICE = "'),
 ])
 def test_shell_exports_per_dialect(shell, prefix):
     lines = shell_exports(resolve_settings("cpu"), shell)
@@ -266,52 +269,275 @@ def test_shell_export_rejects_an_unknown_shell():
         shell_exports(resolve_settings("cpu"), "tcsh")
 
 
+# ----------------------------------------------------------------- overrides
+def test_default_overrides_change_nothing():
+    empty = SettingsOverrides()
+    assert empty.active() == {}
+    settings = resolve_settings("cpu", overrides=empty)
+    assert settings.threads == dev.configure_threads(None)
+    assert settings.origin["threads"] == "auto"
+
+
+def test_an_override_beats_the_measurement():
+    settings = resolve_settings("cpu", overrides=SettingsOverrides(threads=2))
+    assert settings.threads == 2
+    assert settings.origin["threads"] == "override"
+
+
+def test_every_override_reaches_the_settings():
+    overrides = SettingsOverrides(
+        device="cpu", threads=3, preset="smoke", amp=True, checkpointing=True,
+        batch_size=5, block_size=64, tokenizer="char", reserve_ram_gb=0.5,
+        max_cpu_percent=99.0)
+    settings = resolve_settings(overrides=overrides)
+    assert settings.device == "cpu"
+    assert settings.threads == 3
+    assert settings.preset == "smoke"
+    assert settings.amp is True and settings.checkpointing is True
+    assert settings.batch_size == 5 and settings.block_size == 64
+    assert settings.tokenizer == "char"
+
+
+def test_an_explicit_argument_beats_an_override():
+    settings = resolve_settings("cpu", overrides=SettingsOverrides(device="cuda"))
+    assert settings.device == "cpu"
+
+
+def test_an_unknown_preset_is_rejected_by_name():
+    with pytest.raises(ValueError, match="unknown preset"):
+        resolve_settings("cpu", overrides=SettingsOverrides(preset="gigantic"))
+
+
+def test_settings_file_round_trip(tmp_path):
+    written = save_overrides(SettingsOverrides(threads=3, tokenizer="char"),
+                             tmp_path / "apexgpt.settings.json")
+    assert written.exists()
+    payload = json.loads(written.read_text(encoding="utf-8"))
+    assert payload["threads"] == 3 and payload["tokenizer"] == "char"
+    assert payload["device"] is None
+
+    loaded = load_overrides(tmp_path / "apexgpt.settings.json")
+    assert loaded.threads == 3 and loaded.tokenizer == "char"
+    assert loaded.origin["threads"].startswith("file:")
+
+
+def test_the_environment_beats_the_settings_file(tmp_path, monkeypatch):
+    path = tmp_path / "apexgpt.settings.json"
+    save_overrides(SettingsOverrides(threads=3), path)
+    monkeypatch.setenv("APEXGPT_SET_THREADS", "5")
+    loaded = load_overrides(path)
+    assert loaded.threads == 5
+    assert loaded.origin["threads"] == "env:APEXGPT_SET_THREADS"
+
+
+def test_advisory_variables_are_not_treated_as_overrides(monkeypatch):
+    """Exported values must not pin the next run to a stale measurement."""
+    monkeypatch.setenv("APEXGPT_THREADS", "8")
+    monkeypatch.setenv("APEXGPT_PRESET", "cpu-tiny")
+    monkeypatch.setenv("APEXGPT_DEVICE", "cpu")
+    assert load_overrides(tmp_path_that_does_not_exist()).active() == {}
+
+
+def tmp_path_that_does_not_exist() -> Path:
+    return Path("no-such-dir") / "apexgpt.settings.json"
+
+
+def test_a_missing_settings_file_is_simply_empty():
+    assert load_overrides(tmp_path_that_does_not_exist()).active() == {}
+
+
+def test_a_corrupt_settings_file_names_itself(tmp_path):
+    path = tmp_path / "apexgpt.settings.json"
+    path.write_text("{oops", encoding="utf-8")
+    with pytest.raises(ValueError, match="not valid JSON"):
+        load_overrides(path)
+
+
+def test_boolean_overrides_accept_the_usual_spellings(monkeypatch):
+    monkeypatch.setenv("APEXGPT_SET_AMP", "yes")
+    monkeypatch.setenv("APEXGPT_SET_CHECKPOINTING", "0")
+    loaded = load_overrides(tmp_path_that_does_not_exist())
+    assert loaded.amp is True and loaded.checkpointing is False
+
+
+def test_a_non_boolean_override_is_rejected(monkeypatch):
+    monkeypatch.setenv("APEXGPT_SET_AMP", "maybe")
+    with pytest.raises(ValueError, match="not a boolean"):
+        load_overrides(tmp_path_that_does_not_exist())
+
+
+def test_a_non_numeric_override_is_rejected(monkeypatch):
+    monkeypatch.setenv("APEXGPT_SET_THREADS", "lots")
+    with pytest.raises(ValueError):
+        load_overrides(tmp_path_that_does_not_exist())
+
+
+# ------------------------------------------------------- load-aware tuning
+def _load(cpu: float | None = None, ram: float = 6.0) -> SystemLoad:
+    return SystemLoad(cpu_percent=cpu, ram_total_gb=8.0,
+                      ram_available_gb=ram)
+
+
+def test_an_idle_machine_is_left_alone():
+    settings = resolve_settings("cpu", overrides=SettingsOverrides(),
+                                load=_load(cpu=5, ram=6.0))
+    assert settings.notes == []
+    assert settings.batch_size == preset_plan(settings.preset)["batch_size"]
+
+
+def test_a_busy_cpu_hands_a_thread_back():
+    settings = resolve_settings("cpu", load=_load(cpu=97, ram=6.0))
+    assert settings.threads == dev.configure_threads(None) - 1
+    assert any("CPU is" in note for note in settings.notes)
+
+
+def test_low_ram_halves_the_batch():
+    settings = resolve_settings("cpu", load=_load(cpu=5, ram=0.4))
+    planned = preset_plan(settings.preset)["batch_size"]
+    assert settings.batch_size == max(1, planned // 2)
+    assert any("RAM" in note for note in settings.notes)
+
+
+def test_an_explicit_override_survives_a_busy_machine():
+    overrides = SettingsOverrides(threads=2, batch_size=4)
+    settings = resolve_settings("cpu", overrides=overrides,
+                                load=_load(cpu=99, ram=0.2))
+    assert settings.threads == 2
+    assert settings.batch_size == 4
+    assert settings.notes == []
+
+
+def test_the_cpu_threshold_is_configurable():
+    overrides = SettingsOverrides(max_cpu_percent=10.0)
+    settings = resolve_settings("cpu", overrides=overrides, load=_load(cpu=50))
+    assert settings.threads == dev.configure_threads(None) - 1
+
+
+def test_the_reserve_is_configurable():
+    generous = SettingsOverrides(reserve_ram_gb=1.0)
+    assert resolve_settings("cpu", overrides=generous,
+                            load=_load(ram=6.0)).notes == []
+    stingy = SettingsOverrides(reserve_ram_gb=8.0)
+    assert resolve_settings("cpu", overrides=stingy,
+                            load=_load(ram=3.0)).notes != []
+
+
+def test_unknown_cpu_load_never_adjusts():
+    settings = resolve_settings("cpu", load=_load(cpu=None, ram=6.0))
+    assert settings.threads == dev.configure_threads(None)
+
+
+def test_scan_carries_the_load_into_the_report():
+    report = scan(measure_load=True)
+    assert report.load is not None
+    assert report.load.ram_total_gb > 0
+    assert "System load" in report.to_text()
+    assert "CPU in use" in report.to_markdown()
+    assert report.to_dict()["load"]["ram_available_gb"] > 0
+
+
+def test_scan_can_skip_the_live_reading():
+    report = scan(measure_load=False)
+    assert report.load is None
+    assert "System load" not in report.to_text()
+    assert report.to_dict()["load"] is None
+
+
 # ---------------------------------------------------------------------- cli
 def test_env_cli_prints_the_report(capsys):
-    from tinyllm.tools.env import main
+    from apexgpt.tools.env import main
     assert main([]) == 0
     out = capsys.readouterr().out
     assert "Machine spec" in out
-    assert "python -m tinyllm lab" in out
+    assert "System load" in out
+    assert "python -m apexgpt lab" in out
 
 
 def test_env_cli_json_is_parseable(capsys):
-    from tinyllm.tools.env import main
+    from apexgpt.tools.env import main
     assert main(["--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["settings"]["device"]
 
 
 def test_env_cli_check_passes_on_this_environment(capsys):
-    from tinyllm.tools.env import main
+    from apexgpt.tools.env import main
     assert main(["--check", "--json"]) == 0
 
 
 def test_env_cli_export_prints_shell_lines(capsys):
-    from tinyllm.tools.env import main
+    from apexgpt.tools.env import main
     assert main(["--export", "--shell", "bash", "--json"]) == 0
-    assert "export TINYLLM_DEVICE=" in capsys.readouterr().out
+    assert "export APEXGPT_DEVICE=" in capsys.readouterr().out
 
 
 def test_env_cli_saves_a_report(tmp_path, capsys):
-    from tinyllm.tools.env import main
+    from apexgpt.tools.env import main
     target = tmp_path / "env.json"
     assert main(["--json", "--save", str(target)]) == 0
     capsys.readouterr()
     assert json.loads(target.read_text(encoding="utf-8"))["machine"]["cpu"]
 
 
+def test_env_cli_applies_a_flag_override(capsys):
+    from apexgpt.tools.env import main
+    assert main(["--json", "--threads", "2", "--tokenizer", "char"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["settings"]["threads"] == 2
+    assert payload["settings"]["origin"]["threads"] == "flag"
+    assert payload["settings"]["tokenizer"] == "char"
+
+
+def test_env_cli_persists_and_resets_overrides(tmp_path, capsys, monkeypatch):
+    from apexgpt.tools import env as env_module
+    monkeypatch.setattr(env_module, "SETTINGS_FILE", tmp_path / "s.json",
+                        raising=False)
+    monkeypatch.setattr("apexgpt.core.environment.SETTINGS_FILE",
+                        tmp_path / "s.json")
+    assert env_module.main(["--json", "--threads", "2", "--save-settings"]) == 0
+    capsys.readouterr()
+    assert (tmp_path / "s.json").exists()
+
+    assert env_module.main(["--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["settings"]["threads"] == 2
+
+    assert env_module.main(["--json", "--reset-settings"]) == 0
+    capsys.readouterr()
+    assert not (tmp_path / "s.json").exists()
+
+
+def test_env_cli_can_skip_the_live_scan(capsys):
+    from apexgpt.tools.env import main
+    assert main(["--json", "--no-load-scan"]) == 0
+    assert json.loads(capsys.readouterr().out)["load"] is None
+
+
 def test_env_cli_rejects_an_absent_backend(capsys):
-    from tinyllm.tools.env import main
+    from apexgpt.tools.env import main
     assert main(["--device", "definitely-not-a-backend"]) == 1
     assert "not available" in capsys.readouterr().err
+
+
+def test_env_cli_rejects_an_unknown_preset(capsys):
+    from apexgpt.tools.env import main
+    assert main(["--preset", "gigantic"]) == 1
+    assert "unknown preset" in capsys.readouterr().err
 
 
 def test_env_cli_parser_exposes_the_documented_flags():
     parser = env_cli.build_parser()
     args = parser.parse_args(["--device", "cpu", "--export", "--shell", "powershell",
-                              "--check", "--groups", "core,notebook", "--no-apply"])
+                              "--check", "--groups", "core,notebook", "--no-apply",
+                              "--threads", "3", "--no-amp", "--checkpointing",
+                              "--batch-size", "2", "--block-size", "64",
+                              "--tokenizer", "char", "--reserve-ram-gb", "2",
+                              "--max-cpu-percent", "70", "--no-load-scan"])
     assert args.device == "cpu" and args.export and args.check
     assert args.shell == "powershell"
     assert args.groups == "core,notebook"
     assert args.no_apply is True
+    assert args.threads == 3 and args.amp is False and args.checkpointing is True
+    assert args.batch_size == 2 and args.block_size == 64
+    assert args.tokenizer == "char"
+    assert args.reserve_ram_gb == 2 and args.max_cpu_percent == 70
+    assert args.no_load_scan is True

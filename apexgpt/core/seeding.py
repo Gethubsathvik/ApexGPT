@@ -9,7 +9,7 @@ import torch
 
 
 def set_seed(seed: int, deterministic: bool = True) -> None:
-    """Seed every RNG TinyLLM uses.
+    """Seed every RNG ApexGPT uses.
 
     ``PYTHONHASHSEED`` is only read at interpreter start-up, so setting it
     here cannot affect the running process. It is set for child processes and

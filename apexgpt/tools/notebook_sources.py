@@ -4,7 +4,7 @@ A ``.ipynb`` file is a JSON file with escaped newlines, which is unpleasant to
 review and easy to corrupt. The cell sources live here as ordinary Python
 strings instead, and the notebooks on disk are their output::
 
-    python -m tinyllm.tools.notebook_sources      # regenerate notebooks/
+    python -m apexgpt.tools.notebook_sources      # regenerate notebooks/
 
 ``tests/test_lab.py`` asserts the two stay in step, so editing a notebook in
 Jupyter and forgetting this file is caught rather than silently overwritten.
@@ -18,14 +18,14 @@ from pathlib import Path
 from ..core.paths import ROOT
 from .lab import NOTEBOOK_DIR, new_notebook
 
-# Shared by every notebook: makes `import tinyllm` work from a clone.
+# Shared by every notebook: makes `import apexgpt` work from a clone.
 IMPORT_CELL = '''import sys
 from pathlib import Path
 
-# Works whether TinyLLM is pip-installed or merely cloned next to this notebook.
+# Works whether ApexGPT is pip-installed or merely cloned next to this notebook.
 def _repo_root(start):
     for candidate in [start, *start.parents]:
-        if (candidate / "tinyllm" / "__init__.py").exists():
+        if (candidate / "apexgpt" / "__init__.py").exists():
             return candidate
     return start
 
@@ -34,8 +34,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import torch
-import tinyllm
-print("tinyllm", tinyllm.__version__, "from", Path(tinyllm.__file__).parent)'''
+import apexgpt
+print("apexgpt", apexgpt.__version__, "from", Path(apexgpt.__file__).parent)'''
 
 ENVIRONMENT: list[tuple[str, str]] = [
     ("markdown", """
@@ -44,17 +44,17 @@ ENVIRONMENT: list[tuple[str, str]] = [
 This notebook is the Jupyter front end of the same scan the terminal runs:
 
 ```bash
-python -m tinyllm env
+python -m apexgpt env
 ```
 
 It reports the machine spec, every requirement from `requirements*.txt`, and
-the settings TinyLLM resolves for this host - then applies them, so the
+the settings ApexGPT resolves for this host - then applies them, so the
 training and inference cells below use the same device, thread count and
 precision policy as the command line.
 """),
     ("code", IMPORT_CELL),
     ("code", '''
-from tinyllm.core.environment import bootstrap
+from apexgpt.core.environment import bootstrap
 
 report, settings = bootstrap()
 print(report.to_text())
@@ -78,7 +78,7 @@ another device. Asking for a backend that is absent is an error, never a
 silent fallback to the CPU.
 """),
     ("code", '''
-from tinyllm.core.environment import scan
+from apexgpt.core.environment import scan
 
 for candidate in ("cpu", "cuda", "mps", "xpu", "dml"):
     try:
@@ -90,7 +90,7 @@ for candidate in ("cpu", "cuda", "mps", "xpu", "dml"):
 ## Requirements
 
 The scan reads the requirements files, so it cannot drift from what
-`python -m tinyllm setup --install` actually installs.
+`python -m apexgpt setup --install` actually installs.
 """),
     ("code", '''
 for req in report.requirements:
@@ -115,14 +115,14 @@ TRAIN: list[tuple[str, str]] = [
     ("markdown", """
 # 01 - Training
 
-Training is the same call the CLI makes: `tinyllm.features.training.service.train`.
+Training is the same call the CLI makes: `apexgpt.features.training.service.train`.
 Nothing here is notebook-only logic, so a notebook run and
-`python -m tinyllm train` produce the same checkpoint.
+`python -m apexgpt train` produce the same checkpoint.
 """),
     ("code", IMPORT_CELL),
     ("code", '''
-from tinyllm.core.config import Config
-from tinyllm.core.paths import RUNS_DIR
+from apexgpt.core.config import Config
+from apexgpt.core.paths import RUNS_DIR
 
 cfg = Config()
 cfg.data.select_dataset("shakespeare")     # 338k tokens: trains in minutes on a CPU
@@ -139,12 +139,12 @@ Training needs tokenised text. tiny Shakespeare is the fast one - 1.1 MB and
 15 minutes to prepare. Either way the preparation is the same code:
 
 ```bash
-python -m tinyllm data prepare --source shakespeare
-python -m tinyllm data sources             # what else is available
+python -m apexgpt data prepare --source shakespeare
+python -m apexgpt data sources             # what else is available
 ```
 """),
     ("code", '''
-# from tinyllm.features.data.service import prepare
+# from apexgpt.features.data.service import prepare
 # prepare(cfg.data, source="shakespeare")    # ~4 s: download, tokenize, split 80/20
 '''),
     ("markdown", """
@@ -154,7 +154,7 @@ python -m tinyllm data sources             # what else is available
 laptop that is `cpu-tiny`; the scan in notebook 00 already told you which.
 """),
     ("code", '''
-from tinyllm.features.training.service import train
+from apexgpt.features.training.service import train
 
 result = train(cfg, preset="auto", max_iters=100, log_interval=10,
                run_name="gpt-shakespeare")
@@ -190,8 +190,8 @@ parameters are identical across all four front ends.
 """),
     ("code", IMPORT_CELL),
     ("code", '''
-from tinyllm.features.inference.service import GenerationRequest, InferenceEngine
-from tinyllm.core.paths import RUNS_DIR
+from apexgpt.features.inference.service import GenerationRequest, InferenceEngine
+from apexgpt.core.paths import RUNS_DIR
 
 candidates = sorted(RUNS_DIR.glob("*/checkpoint.pt"))
 print("checkpoints found:")
@@ -208,7 +208,7 @@ if Path(CHECKPOINT).exists():
 elif candidates:
     engine.load(candidates[-1])
 else:
-    print("no checkpoint yet - run 01_train.ipynb, or: python -m tinyllm train")
+    print("no checkpoint yet - run 01_train.ipynb, or: python -m apexgpt train")
 '''),
     ("markdown", "## One-shot generation"),
     ("code", '''
@@ -247,6 +247,50 @@ for temperature in (0.1, 0.7, 1.2):
     text = "".join(engine.stream(GenerationRequest(
         prompt="KING RICHARD II:", max_new_tokens=30, temperature=temperature)))
     print(f"T={temperature}: {text}")
+'''),
+    ("markdown", """
+## What the model expects next
+
+Sampling draws one token and throws the rest of the distribution away.
+`predict_next` keeps it: the ranking the loss function was actually minimising,
+plus the entropy of the whole distribution. `ln(vocab_size)` nats would be a
+uniform model that has learned nothing.
+"""),
+    ("code", '''
+import math
+
+for prompt in ("ROMEO:", "KING RICHARD II:"):
+    rows, entropy = engine.predict_next_with_entropy(prompt, top_k=5)
+    print(f"\\n{prompt!r}")
+    for row in rows:
+        print(f"  {row.rank}. p={row.probability:.4f} logp={row.logprob:>7.3f}  {row.label}")
+    print(f"  entropy {entropy:.3f} nats of a possible {math.log(engine.metadata()['vocab_size']):.3f}")
+'''),
+    ("markdown", """
+The same thing is one CLI flag, on any checkpoint:
+
+```
+python -m apexgpt generate --prompt "KING RICHARD II:" --predict 5
+```
+"""),
+    ("markdown", """
+## Hugging Face and Kaggle
+
+The same next-token question can be asked of a pretrained model instead of one
+trained here, which is the honest way to compare a 30M-parameter run against a
+real LLM. It needs the optional Hub extras:
+
+```
+python -m apexgpt setup --hub --install
+python -m apexgpt hub check
+python -m apexgpt hub model gpt2 --predict "KING RICHARD II:" --top-k 5
+```
+"""),
+    ("code", '''
+from apexgpt.features.hub import check as hub_check
+
+for label, available, detail in hub_check():
+    print(f"  [{'ok' if available else '--'}] {label:<42} {detail}")
 '''),
 ]
 

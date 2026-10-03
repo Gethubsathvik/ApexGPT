@@ -5,7 +5,7 @@
 # Intel XPU, Apple Metal, or plain CPU), and a single pin cannot serve all of
 # them. Install torch FIRST using the helper, then install this file:
 #
-#     python -m tinyllm setup --install        # detects the backend for you
+#     python -m apexgpt setup --install        # detects the backend for you
 #
 # That installs the matching wheel (e.g. the cu124 index on an NVIDIA box) and
 # then runs `pip install -r requirements.txt` for everything below. If you
@@ -18,9 +18,9 @@
 #     CPU only         : pip install torch --index-url https://download.pytorch.org/whl/cpu
 #     Apple Silicon    : pip install torch          (Metal ships in the default wheel)
 #     AMD/Intel (Win)  : pip install torch-directml (optional; then --device dml)
-#     any of the above : python -m tinyllm setup --install    picks it for you
+#     any of the above : python -m apexgpt setup --install    picks it for you
 #
-# `python -m tinyllm env` reports which of these this machine can actually use.
+# `python -m apexgpt env` reports which of these this machine can actually use.
 #
 # Python 3.10-3.12 has the widest wheel coverage; 3.13/3.14 work but may not have
 # an accelerator build for every platform yet.

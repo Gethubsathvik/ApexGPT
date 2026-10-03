@@ -1,0 +1,12 @@
+{
+  "device": null,
+  "threads": null,
+  "preset": null,
+  "amp": null,
+  "checkpointing": null,
+  "batch_size": null,
+  "block_size": null,
+  "tokenizer": null,
+  "reserve_ram_gb": null,
+  "max_cpu_percent": null
+}

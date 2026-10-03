@@ -2,7 +2,7 @@
 #
 # Install with:  pip install -r requirements-api.txt
 #
-# Only needed for `python -m tinyllm serve`. Training, the CLI and the desktop
+# Only needed for `python -m apexgpt serve`. Training, the CLI and the desktop
 # GUI do not import any of this.
 fastapi>=0.110
 uvicorn[standard]>=0.27

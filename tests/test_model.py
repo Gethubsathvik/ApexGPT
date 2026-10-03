@@ -16,11 +16,11 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tinyllm.core.config import Config, ModelConfig, TrainConfig
-from tinyllm.features.training.service import lr_at, make_optimizer, steps_per_epoch
-from tinyllm.models.builder import build_model, count_parameters
-from tinyllm.models.gpt import GPT
-from tinyllm.models.sampling import (apply_repetition_penalty, apply_top_k,
+from apexgpt.core.config import Config, ModelConfig, TrainConfig
+from apexgpt.features.training.service import lr_at, make_optimizer, steps_per_epoch
+from apexgpt.models.builder import build_model, count_parameters
+from apexgpt.models.gpt import GPT
+from apexgpt.models.sampling import (apply_repetition_penalty, apply_top_k,
                                      apply_top_p, sample_next_token)
 
 TINY = dict(vocab_size=512, block_size=32, n_layer=2, n_head=4,

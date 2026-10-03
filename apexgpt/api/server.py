@@ -1,10 +1,10 @@
 """Optional HTTP inference service.
 
-This is the one part of TinyLLM that runs as a standalone process. It exists so
+This is the one part of ApexGPT that runs as a standalone process. It exists so
 the model can be shared by other programs - a phone, a web front end, a second
 machine - without linking against Python.
 
-Scope note: TinyLLM deliberately stops at a single service. Turning data
+Scope note: ApexGPT deliberately stops at a single service. Turning data
 preparation and training into separate network services would add ports,
 health checks and partial-failure modes to a workflow that is offline and
 single-user, without making it better. The feature slices are already isolated
@@ -14,7 +14,7 @@ deployable later without touching the rest.
 Run with::
 
     pip install -r requirements-api.txt
-    python -m tinyllm serve --port 8000
+    python -m apexgpt serve --port 8000
 """
 import argparse
 import json
@@ -64,7 +64,7 @@ def _pydantic_models():
 
     class CompletionRequest(BaseModel):
         """OpenAI-compatible subset of ``/v1/completions``."""
-        model: str = "tinyllm"
+        model: str = "apexgpt"
         prompt: str = Field(..., min_length=1)
         max_tokens: int = Field(200, ge=1, le=4096)
         temperature: float = Field(0.8, ge=0.0, le=5.0)
@@ -91,9 +91,9 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
     GenerateRequest, GenerateResponse, CompletionRequest = _pydantic_models()
 
     app = FastAPI(
-        title="TinyLLM inference API",
+        title="ApexGPT inference API",
         version="1.2.0",
-        description="Next-token generation from a TinyLLM GPT checkpoint.",
+        description="Next-token generation from a ApexGPT GPT checkpoint.",
     )
 
     @app.get("/health")
@@ -151,10 +151,10 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
 
     @app.post("/v1/completions")
     def openai_completions(req: CompletionRequest):
-        """OpenAI-compatible alias, so off-the-shelf clients can talk to TinyLLM.
+        """OpenAI-compatible alias, so off-the-shelf clients can talk to ApexGPT.
 
         Only the non-streaming path is exposed here: OpenAI streams token objects
-        while TinyLLM streams bare text, and faking that shape would break more
+        while ApexGPT streams bare text, and faking that shape would break more
         clients than it would serve. Use ``/stream`` for incremental output.
         """
         if req.stream:
@@ -194,15 +194,15 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
                 "completion_tokens": completion_tokens,
                 "total_tokens": prompt_tokens + completion_tokens,
             },
-            "tinyllm": {"elapsed_s": round(elapsed, 4), **engine.metadata()},
+            "apexgpt": {"elapsed_s": round(elapsed, 4), **engine.metadata()},
         }
 
     return app
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="tinyllm serve",
-                                 description="Run the TinyLLM inference API")
+    ap = argparse.ArgumentParser(prog="apexgpt serve",
+                                 description="Run the ApexGPT inference API")
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (use 0.0.0.0 to expose on the LAN)")
     ap.add_argument("--port", type=int, default=8000)
@@ -220,7 +220,7 @@ def main(argv=None) -> int:
 
     meta = engine.metadata()
     print("=" * 66)
-    print(f"TinyLLM API - {meta['parameters_m']}M params on {meta['device']}")
+    print(f"ApexGPT API - {meta['parameters_m']}M params on {meta['device']}")
     print(f"checkpoint: {meta['checkpoint']}")
     print(f"listening:  http://{args.host}:{args.port}")
     print("=" * 66)

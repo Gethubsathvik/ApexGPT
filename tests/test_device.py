@@ -13,15 +13,15 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tinyllm.core import device as dev
-from tinyllm.core.device import (HardwareProfile, autocast_dtype, available_backends,
+from apexgpt.core import device as dev
+from apexgpt.core.device import (HardwareProfile, autocast_dtype, available_backends,
                                  configure_threads, cuda_available,
                                  describe_device, device_flavor, dml_available,
                                  get_device, mps_available, profile, rocm_build,
                                  supports_bf16, total_ram_gb, total_vram_gb,
                                  use_amp_by_default, use_checkpointing_by_default,
                                  xpu_available)
-from tinyllm.tools import setup as bootstrap
+from apexgpt.tools import setup as bootstrap
 
 
 # --------------------------------------------------------------- backends

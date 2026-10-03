@@ -1,4 +1,4 @@
-"""Typed configuration for every layer of TinyLLM."""
+"""Typed configuration for every layer of ApexGPT."""
 from __future__ import annotations
 
 import os
@@ -10,7 +10,7 @@ from .paths import DATA_DIR
 
 def _default_dataset() -> str:
     """Corpus key from the environment, so scripts and notebooks can switch."""
-    return os.environ.get("TINYLLM_DATASET", "wikipedia")
+    return os.environ.get("APEXGPT_DATASET", "wikipedia")
 
 
 @dataclass
@@ -24,7 +24,11 @@ class DataConfig:
     # Each corpus gets its own directory. Pass an explicit path to override.
     raw_dir: Path | None = None
     binary_dir: Path | None = None
-    dataset_name: str = "tinyllm-corpus"
+    dataset_name: str = "apexgpt-corpus"
+    # gpt2 (50,257 ids) or char (257 ids, one per UTF-8 byte). Recorded beside
+    # the token binaries; read back by training and inference.
+    tokenizer: str = field(
+        default_factory=lambda: os.environ.get("APEXGPT_TOKENIZER", "gpt2"))
 
     def __post_init__(self) -> None:
         # Not a dataclass field: asdict() must not serialise it.
@@ -100,7 +104,7 @@ class TrainConfig:
     use_amp: bool = True
     use_checkpointing: bool = True
     num_threads: int | None = None      # None -> all available cores
-    run_name: str = "gpt-tinyllm"
+    run_name: str = "gpt-apexgpt"
 
 
 @dataclass

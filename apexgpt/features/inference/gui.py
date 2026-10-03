@@ -1,7 +1,7 @@
 """Tkinter desktop GUI for the trained model.
 
 The view owns no model logic: generation runs through
-:class:`~tinyllm.features.inference.service.InferenceEngine` on a background
+:class:`~apexgpt.features.inference.service.InferenceEngine` on a background
 thread, so the window stays responsive and the sampling behaviour is identical
 to the CLI and the HTTP API.
 """
@@ -29,7 +29,7 @@ INPUT_BG = "#313244"
 OUTPUT_BG = "#11111b"
 
 
-class TinyLLMApp:
+class ApexGPTApp:
     """Main window. All generation happens on a worker thread."""
 
     def __init__(self, root: tk.Tk, engine: InferenceEngine):
@@ -46,7 +46,7 @@ class TinyLLMApp:
     # ------------------------------------------------------------------ setup
     def _build(self) -> None:
         r = self.root
-        r.title("TinyLLM - Language Model Playground")
+        r.title("ApexGPT - Language Model Playground")
         r.geometry("1080x760")
         r.configure(bg=BG)
         r.minsize(880, 620)
@@ -68,7 +68,7 @@ class TinyLLMApp:
 
         head = ttk.Frame(r, padding=(14, 10, 14, 0))
         head.pack(fill="x")
-        ttk.Label(head, text="TinyLLM", style="Head.TLabel").pack(side="left")
+        ttk.Label(head, text="ApexGPT", style="Head.TLabel").pack(side="left")
         self.meta_label = ttk.Label(head, text="", style="Muted.TLabel")
         self.meta_label.pack(side="left", padx=12)
 
@@ -249,8 +249,8 @@ class TinyLLMApp:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="tinyllm gui",
-                                 description="TinyLLM desktop GUI")
+    ap = argparse.ArgumentParser(prog="apexgpt gui",
+                                 description="ApexGPT desktop GUI")
     ap.add_argument("--checkpoint", default=None)
     ap.add_argument("--device", default="auto")
     args = ap.parse_args(argv)
@@ -262,7 +262,7 @@ def main(argv=None) -> int:
         return 1
 
     root = tk.Tk()
-    TinyLLMApp(root, engine)
+    ApexGPTApp(root, engine)
     root.mainloop()
     return 0
 

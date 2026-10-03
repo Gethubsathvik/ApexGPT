@@ -17,10 +17,10 @@ pytest.importorskip("tkinter", reason="tkinter is not available")
 
 tk = pytest.importorskip("tkinter")
 
-from tinyllm.core.config import ModelConfig
-from tinyllm.features.inference.gui import TinyLLMApp
-from tinyllm.features.inference.service import InferenceEngine
-from tinyllm.models.builder import build_model
+from apexgpt.core.config import ModelConfig
+from apexgpt.features.inference.gui import ApexGPTApp
+from apexgpt.features.inference.service import InferenceEngine
+from apexgpt.models.builder import build_model
 
 
 def _has_display() -> bool:
@@ -68,7 +68,7 @@ def engine(tmp_path_factory):
 def app(engine):
     root = tk.Tk()
     root.withdraw()
-    widget = TinyLLMApp(root, engine)
+    widget = ApexGPTApp(root, engine)
     root.update()
     yield widget
     root.destroy()

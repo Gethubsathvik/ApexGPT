@@ -162,6 +162,15 @@ def train(cfg: Config, preset: str = "cpu-tiny", max_iters: int | None = None,
     p = PRESETS[preset]
     hw = profile()
 
+    # The corpus records which tokenizer its tokens came from; the model's
+    # vocabulary has to match it or every logit is indexed against the wrong
+    # table. Older corpora predate the record and were always GPT-2.
+    from ..data.tokenizers import resolve_corpus_spec
+    tok_spec = resolve_corpus_spec(cfg.data.binary_dir, cfg.data.tokenizer)
+    cfg.model.vocab_size = tok_spec.vocab_size
+    cfg.data.vocab_size = tok_spec.vocab_size
+    cfg.data.tokenizer = tok_spec.kind
+
     cfg.model.n_layer = p["n_layer"]
     cfg.model.n_head = p["n_head"]
     cfg.model.n_embd = p["n_embd"]
@@ -202,6 +211,7 @@ def train(cfg: Config, preset: str = "cpu-tiny", max_iters: int | None = None,
     progress(f"[device]   {describe_device(device)} | cpu threads {threads}")
     progress(f"[preset]   {preset} | {tc.max_iters} iters | batch {cfg.data.batch_size} "
              f"| block {cfg.model.block_size}")
+    progress(f"[tokenize] {tok_spec.kind} tokenizer, vocab {tok_spec.vocab_size}")
     progress(f"[mem]      amp={tc.use_amp} grad_checkpointing={tc.use_checkpointing}"
              + ("" if device.type != "cpu"
                 else "   (CPU: bf16 is emulated without native support and"
@@ -219,7 +229,7 @@ def train(cfg: Config, preset: str = "cpu-tiny", max_iters: int | None = None,
         raise FileNotFoundError(
             f"token binaries for corpus {cfg.data.dataset!r} are missing "
             f"(expected {cfg.data.binary_dir}) -- run: "
-            f"python -m tinyllm data prepare --source {cfg.data.dataset}")
+            f"python -m apexgpt data prepare --source {cfg.data.dataset}")
 
     if epochs is not None and max_iters is None:
         total_tokens = cfg.data.train_path.stat().st_size // 2
@@ -321,7 +331,8 @@ def train(cfg: Config, preset: str = "cpu-tiny", max_iters: int | None = None,
             model.save(ckpt_path, optimizer=optimizer, step=step + 1,
                        extra={"val_loss": best_val, "best_val_loss": best_val,
                               "history": history, "config": cfg.to_dict(),
-                              "preset": preset})
+                              "preset": preset, "tokenizer": tok_spec.kind,
+                              "vocab_size": tok_spec.vocab_size})
             (run_dir / "history.json").write_text(json.dumps(history, indent=2))
 
     elapsed = time.time() - t_start
@@ -330,9 +341,10 @@ def train(cfg: Config, preset: str = "cpu-tiny", max_iters: int | None = None,
     model.save(ckpt_path, optimizer=optimizer, step=tc.max_iters,
                extra={"val_loss": final_val, "best_val_loss": best_val,
                       "history": history, "config": cfg.to_dict(),
-                      "preset": preset})
+                      "preset": preset, "tokenizer": tok_spec.kind,
+                      "vocab_size": tok_spec.vocab_size})
     (run_dir / "history.json").write_text(json.dumps(history, indent=2))
-    plot_curves(history, run_dir / "loss_curves.png", f"TinyLLM - {tc.run_name}")
+    plot_curves(history, run_dir / "loss_curves.png", f"ApexGPT - {tc.run_name}")
 
     batcher.close()
 

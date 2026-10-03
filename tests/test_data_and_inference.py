@@ -13,13 +13,13 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tinyllm.core.config import DataConfig
-from tinyllm.features.data.service import (TokenBatcher, _split_binary,
+from apexgpt.core.config import DataConfig
+from apexgpt.features.data.service import (TokenBatcher, _split_binary,
                                            count_distinct_tokens, tokenize_corpus)
-from tinyllm.features.inference.service import (GenerationRequest,
+from apexgpt.features.inference.service import (GenerationRequest,
                                                 InferenceEngine)
-from tinyllm.models.builder import build_model
-from tinyllm.models.gpt import GPT
+from apexgpt.models.builder import build_model
+from apexgpt.models.gpt import GPT
 
 
 @pytest.fixture(scope="module")
@@ -164,7 +164,7 @@ class StubEngineTokenizer:
 
 def _engine(tmp_path):
     model = build_model(
-        __import__("tinyllm.core.config", fromlist=["ModelConfig"]).ModelConfig(
+        __import__("apexgpt.core.config", fromlist=["ModelConfig"]).ModelConfig(
             vocab_size=64, block_size=16, n_layer=1, n_head=2, n_embd=32))
     path = tmp_path / "checkpoint.pt"
     model.save(path, step=5)
@@ -210,7 +210,7 @@ def test_request_validation_rejects_bad_values():
 
 
 def test_find_checkpoint_raises_when_absent(tmp_path, monkeypatch):
-    from tinyllm.features.inference import service
+    from apexgpt.features.inference import service
     monkeypatch.setattr(service, "CHECKPOINTS_DIR", tmp_path)
     monkeypatch.setattr(service, "RUNS_DIR", tmp_path)
     with pytest.raises(FileNotFoundError, match="train one first"):

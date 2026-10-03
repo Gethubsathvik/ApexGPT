@@ -15,9 +15,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tinyllm.core.environment import resolve_settings
-from tinyllm.tools import lab
-from tinyllm.tools.lab import (KERNEL_DISPLAY_NAME, KERNEL_NAME, NOTEBOOK_DIR,
+from apexgpt.core.environment import resolve_settings
+from apexgpt.tools import lab
+from apexgpt.tools.lab import (KERNEL_DISPLAY_NAME, KERNEL_NAME, NOTEBOOK_DIR,
                                kernel_dir, lab_command, module_version,
                                new_notebook, notebook_files, read_kernel_spec,
                                validate_notebooks, write_kernel_spec)
@@ -25,7 +25,7 @@ from tinyllm.tools.lab import (KERNEL_DISPLAY_NAME, KERNEL_NAME, NOTEBOOK_DIR,
 jupyterlab_installed = lab.lab_installed()
 needs_lab = pytest.mark.skipif(not jupyterlab_installed,
                                reason="jupyterlab is not installed "
-                                      "(python -m tinyllm lab --install)")
+                                      "(python -m apexgpt lab --install)")
 
 
 # ------------------------------------------------------------------- kernel
@@ -38,7 +38,7 @@ def test_kernel_spec_carries_the_resolved_settings(tmp_path):
     assert spec["language"] == "python"
     assert spec["argv"][1:3] == ["-m", "ipykernel_launcher"]
     assert sys.executable in spec["argv"][0]
-    assert spec["env"]["TINYLLM_DEVICE"] == "cpu"
+    assert spec["env"]["APEXGPT_DEVICE"] == "cpu"
     assert spec["env"]["OMP_NUM_THREADS"] == str(settings.threads)
 
 
@@ -96,15 +96,15 @@ def test_notebook_validation_flags_stored_outputs(tmp_path):
 
 def test_notebooks_match_their_sources_in_this_module():
     """Regenerating the notebooks must be a no-op: they are generated files."""
-    from tinyllm.tools.notebook_sources import build_all
+    from apexgpt.tools.notebook_sources import build_all
 
     built = build_all()
     assert sorted(built) == [p.name for p in notebook_files()]
     for name, document in built.items():
         on_disk = json.loads((NOTEBOOK_DIR / name).read_text(encoding="utf-8"))
         assert on_disk == document, (
-            f"{name} differs from tinyllm/tools/notebook_sources.py - "
-            f"regenerate with: python -m tinyllm.tools.notebook_sources")
+            f"{name} differs from apexgpt/tools/notebook_sources.py - "
+            f"regenerate with: python -m apexgpt.tools.notebook_sources")
 
 
 def test_new_notebook_shape_is_valid_nbformat():
@@ -141,7 +141,7 @@ def test_environment_notebook_executes_in_the_registered_kernel(tmp_path):
         "as_version=4)\n"
         f"NotebookClient(nb, timeout=600, kernel_name={KERNEL_NAME!r}).execute()\n"
         "text = '\\n'.join(str(o) for c in nb.cells for o in c.get('outputs', []))\n"
-        "assert 'TinyLLM environment' in text, text[:2000]\n"
+        "assert 'ApexGPT environment' in text, text[:2000]\n"
         "print('executed', len(nb.cells), 'cells')\n",
         encoding="utf-8")
     write_kernel_spec(resolve_settings("cpu"))
@@ -177,7 +177,7 @@ def test_lab_cli_registers_the_kernel_without_starting_lab(tmp_path, capsys,
     out = capsys.readouterr().out
     assert "kernel registered" in out
     spec = json.loads((tmp_path / KERNEL_NAME / "kernel.json").read_text("utf-8"))
-    assert spec["env"]["TINYLLM_PRESET"]
+    assert spec["env"]["APEXGPT_PRESET"]
 
 
 def test_lab_cli_reports_a_missing_install_instead_of_crashing(monkeypatch, capsys):
@@ -213,4 +213,4 @@ def test_jupyter_lab_lists_the_registered_kernel():
     spec = manager.get_kernel_spec(KERNEL_NAME)
     assert spec.language == "python"
     assert sys.executable in spec.argv
-    assert spec.env.get("TINYLLM_DEVICE") == "cpu"
+    assert spec.env.get("APEXGPT_DEVICE") == "cpu"

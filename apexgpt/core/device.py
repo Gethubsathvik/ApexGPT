@@ -1,6 +1,6 @@
 """Device selection, thread configuration, and precision policy.
 
-TinyLLM runs on whatever accelerator PyTorch exposes on the host:
+ApexGPT runs on whatever accelerator PyTorch exposes on the host:
 
 ===============  =====================================================
 backend          how it is detected
@@ -20,7 +20,7 @@ AMD GPUs are reachable two ways: a ROCm PyTorch build, which reports itself as
 ``cuda`` (:func:`rocm_build` says which), or ``torch-directml`` on Windows,
 which is opt-in through ``--device dml`` because DirectML has no fused
 attention kernel and is usually slower than a full CPU thread pool for
-training. See ``python -m tinyllm doctor`` for what a host actually offers.
+training. See ``python -m apexgpt doctor`` for what a host actually offers.
 """
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ def get_device(preferred: str | None = None) -> torch.device:
         if not dml_available():
             raise RuntimeError(
                 "'dml' requested but torch-directml is not installed. "
-                "Install it with: python -m tinyllm setup --backend dml --install"
+                "Install it with: python -m apexgpt setup --backend dml --install"
             )
         import torch_directml
         return torch_directml.device()
@@ -169,7 +169,7 @@ def supports_bf16(device: torch.device) -> bool:
 def use_amp_by_default(device: torch.device) -> bool:
     """Mixed precision: on for accelerators, off for CPUs without native bf16.
 
-    Measured on an AMD Ryzen 3 7320U (Zen2) with the cpu-tiny preset:
+    Measured on a 4-core / 8-thread CPU-only machine with the cpu-tiny preset:
     195 s/iter with bf16 autocast plus gradient checkpointing, versus
     2.95 s/iter with plain fp32 and no checkpointing - a 66x difference.
     """

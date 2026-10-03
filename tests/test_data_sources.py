@@ -14,10 +14,10 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tinyllm.core.config import DataConfig
-from tinyllm.features.data import sources
-from tinyllm.features.data.cli import build_parser, main
-from tinyllm.features.data.sources import (REGISTRY, Corpus, convert_to_text,
+from apexgpt.core.config import DataConfig
+from apexgpt.features.data import sources
+from apexgpt.features.data.cli import build_parser, main
+from apexgpt.features.data.sources import (REGISTRY, Corpus, convert_to_text,
                                            describe_sources, download_file,
                                            fetch_corpus, legacy_corpus, resolve,
                                            token_estimate)
@@ -195,7 +195,7 @@ def test_fetch_corpus_rejects_a_kind_the_service_owns(tmp_path):
 
 def test_hf_stream_failure_names_the_dataset(tmp_path):
     """A bad repo id must say so, not fail deep inside the reader."""
-    corpus = Corpus("x", "x", "hf-stream", "tinyllm/definitely-not-a-dataset")
+    corpus = Corpus("x", "x", "hf-stream", "apexgpt/definitely-not-a-dataset")
     with pytest.raises(RuntimeError) as excinfo:
         sources.stream_hf_dataset(corpus, tmp_path / "out.txt", target_mb=1,
                                   progress=lambda *a: None)
@@ -292,7 +292,7 @@ def test_data_cli_reports_an_unknown_source(capsys):
 # --------------------------------------------------------------- end to end
 def test_prepare_builds_tokens_from_a_local_file(tmp_path):
     """The whole path: local text -> uint16 binaries -> next-token pairs."""
-    from tinyllm.features.data.service import TokenBatcher, prepare
+    from apexgpt.features.data.service import TokenBatcher, prepare
 
     source = tmp_path / "corpus.txt"
     source.write_text(SHAKESPEARE_LINES * 40, encoding="utf-8")
