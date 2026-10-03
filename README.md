@@ -578,11 +578,11 @@ compression    : 1.00 tokens per character
 By default every id that occurs is listed, in id order; `--top N` shows only the
 N most frequent (with the share of the corpus they account for) and `--limit N`
 caps how many rows print. The same corpus with the GPT-2 BPE default is
-`338,025` tokens over `11,706` distinct ids — 3.30 tokens per character — which
-is the whole tokenizer comparison, measured on the same bytes:
+`338,025` tokens over `11,706` distinct ids, which is the whole tokenizer
+comparison, measured on the same bytes:
 
-| `--tokenizer` | ids | tokens | distinct ids used | tokens/char |
-|---------------|-----|--------|-------------------|-------------|
+| `--tokenizer` | ids | tokens | distinct ids used | characters per token |
+|---------------|-----|--------|-------------------|----------------------|
 | `char` | 257 | 1,115,394 | 65 | 1.00 |
 | `gpt2` | 50,257 | 338,025 | 11,706 | 3.30 |
 
@@ -1510,13 +1510,15 @@ python -m pytest tests -q
 Every push and pull request runs the suite on Linux and Windows (Python 3.11 and
 3.13) in [`.github/workflows/tests.yml`](.github/workflows/tests.yml), plus a
 second job that builds the wheel and runs `apexgpt --help` from the installed
-package — so packaging cannot rot unnoticed.
+package — so packaging cannot rot unnoticed. Each failing test is reported as a
+GitHub annotation, so a red run names itself instead of only its exit code.
 
 | File | Covers |
 |------|--------|
 | `tests/test_model.py` | architecture, causality, KV cache, sampling, LR schedule |
 | `tests/test_data_and_inference.py` | tokenize/split/batch, engine streaming |
 | `tests/test_data_sources.py` | corpus registry, URL/local/HF/Kaggle fetch, conversions, per-corpus paths |
+| `tests/test_token_table.py` | `data tokens`: id table, counts and share, `--top`/`--limit`, slices, successor ranking |
 | `tests/test_device.py` | backend probes, precision policy, presets, wheel indexes |
 | `tests/test_system.py` | live CPU/RAM/disk/process probes, their fallbacks, threshold arithmetic |
 | `tests/test_environment.py` | the scan: spec, requirements, settings, overrides, load scan, shell export, CLI |
@@ -1534,7 +1536,8 @@ pass, that gradient checkpointing is bit-identical to the plain path, and that a
 
 The GUI, API and Jupyter suites skip themselves automatically when Tk, FastAPI
 or jupyterlab is unavailable, so the suite passes headless and without the
-notebook extras.
+notebook extras. CI installs the `notebook` extra anyway, so those suites really
+run there instead of quietly skipping.
 
 ---
 
@@ -1603,6 +1606,7 @@ Notable defects caught during the audit and regression-tested:
 | `PROJECT_ROOT` was `parent.parent.parent` unconditionally | an installed copy wrote checkpoints and corpora into `site-packages` |
 | `/v1/completions` hardcoded `"logprobs": null` and `finish_reason: "length"` | clients could not score the model, and an eos stop was reported as a full-length one |
 | `data tokens` sent the default corpus to `fetch_corpus` | `ValueError: source kind 'wikipedia' is handled by the data service`, so the one command that only reads text could not inspect the default corpus at all |
+| A lab test called `lab.main(["--register-only"])` for real | it returns 1 when jupyterlab is absent, so all four CI jobs failed on a machine-dependent test while the local suite passed |
 
 ---
 
