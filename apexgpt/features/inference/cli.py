@@ -6,7 +6,7 @@ import math
 import sys
 
 from ...core.text import console_safe
-from .service import GenerationRequest, InferenceEngine
+from .service import GenerationRequest, InferenceEngine, Prediction
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,8 +92,8 @@ def _run_once(engine: InferenceEngine, args) -> None:
     if args.predict > 0:
         _print_predictions(engine, req.prompt, args.predict, 1.0)
     if args.next_word:
-        word = engine.predict_next_text(req.prompt)
-        print(f"[next]   most likely next word: {console_safe(word)!r}")
+        word = Prediction(1, 0, engine.predict_next_text(req.prompt), 0.0, 0.0)
+        print(f"[next]   most likely next word: {word.label}")
     print("-" * 70)
     print(console_safe(req.prompt), end="", flush=True)
     import time
