@@ -744,6 +744,83 @@ implements it — or listed as **not used**, with the reason. Nothing is decorat
 Where the distinction matters, the honest answer is more useful than a formula
 that looks impressive.
 
+### 📇 Formula index
+
+The complete list, with the notation each symbol carries. Sections further down
+derive *why* each one is here; this table is for looking one up.
+
+| # | What it computes | Formula | Notation | Implemented |
+|---|---|---|---|---|
+| 1 | Training objective | $\mathcal{L} = -\frac{1}{T}\sum_{t=1}^{T}\log\,\mathrm{softmax}(z_t)_{x_t}$ | $T$ tokens per block, $z_t$ logits at position $t$, $x_t$ the token that came next, $\theta$ the weights | `models/gpt.py:229` |
+| 2 | Output layer / sampling distribution | $p_i = \dfrac{e^{z_i}}{\sum_{j=1}^{V}e^{z_j}}$ | $z\in\mathbb{R}^{V}$ logits, $V$ vocabulary (50257 or 257) | `models/sampling.py:103` |
+| 3 | Multi-head causal attention | $\mathrm{Attn}(Q,K,V)=\mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V$ | $d_k = d/H$ per-head width (`n_head` × `head_dim` in the code), $Q=XW_Q,\ K=XW_K,\ V=XW_V$ | `models/gpt.py:63` |
+| 4 | Causality mask | $M_{ij}=0$ if $j\le i$, $-\infty$ otherwise | $i$ query position, $j$ key position; $-\infty$ kills the softmax term | `models/gpt.py:71` |
+| 5 | Every parameter's entry point | $z = Wx+b$ | $W$ weight matrix, $b$ bias vector | `nn.Linear`, `nn.Embedding` |
+| 6 | MLP nonlinearity | $\mathrm{GELU}(z)=z\,\Phi(z),\quad \Phi(z)=\frac{1}{\sqrt{2\pi}}\int_{-\infty}^{z}e^{-t^2/2}\,dt$ | $\Phi$ = standard normal CDF | `models/gpt.py:88` |
+| 7 | Feature-wise standardisation | $\mathrm{LN}(z)=\gamma\odot\frac{z-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta$ | $\mu,\sigma^2$ over the $d$ features of **one** token, $\gamma,\beta$ per-feature scale/shift, $\odot$ elementwise | `nn.LayerNorm` |
+| 8 | Residual path | $x \leftarrow x + F(\mathrm{LN}(x))$ | pre-norm: keeps the skip path an identity | `models/gpt.py:107` |
+| 9 | Weight tying | $W_{lm} = E_{token}$ | one embedding matrix, used as input lookup and output layer | `models/gpt.py:127` |
+| 10 | Inverted dropout | $\tilde{z}_i=\dfrac{z_i}{1-p}\cdot m_i,\quad m_i\sim\mathrm{Bernoulli}(1-p)$ | $p=0.1$ on embeddings, attention weights and MLP outputs; scaled by $1/(1-p)$ during training, identity at inference | `models/gpt.py:40` |
+| 11 | Initialisation | $w\sim\mathcal{N}(0,0.02^2)$; residual projections $w\sim\mathcal{N}\!\left(0,\left(\tfrac{0.02}{\sqrt{2L}}\right)^2\right)$ | $L$ layers; scales residual branches by $1/\sqrt{2L}$ | `models/gpt.py:131` |
+| 12 | Optimiser (AdamW) | $\theta\leftarrow\theta-\alpha\frac{\hat m_t/(1-\beta_1^t)}{\sqrt{\hat v_t/(1-\beta_2^t)}+\epsilon}$ | $\alpha$ learning rate, $\hat m_t,\hat v_t$ bias-corrected moments, $\beta_1=0.9$, $\beta_2=0.95$, $\epsilon=10^{-8}$ | `features/training/service.py:65` |
+| 13 | Decoupled weight decay | $\theta \leftarrow \theta - \lambda\theta$ | $\lambda=0.1$, matrices only ($p.\mathrm{dim}\ge2$) | `features/training/service.py:64` |
+| 14 | Gradient clipping | $g\leftarrow g\cdot\min\!\left(1,\frac{\tau}{\lVert g\rVert_2}\right)$ | $\tau=1.0$ | `features/training/service.py:307` |
+| 15 | Learning-rate schedule | $\eta_t=\eta_{max}\frac{t+1}{T_w}$, then $\eta_t=\eta_{min}+\frac12(\eta_{max}-\eta_{min})(1+\cos\pi p)$ | $T_w$ warmup steps $= \max(10, 0.05T)$, $p$ decay progress, $\eta_{max}=3\times10^{-4}$, $\eta_{min}=3\times10^{-5}$ | `features/training/service.py:48` |
+| 16 | Sampling temperature | $p_i=\frac{\exp(z_i/T)}{\sum_j\exp(z_j/T)}$ | $T>1$ flattens, $T<1$ sharpens, $T\le 0$ greedy `argmax` | `models/sampling.py:98` |
+| 17 | Top-$k$ filter | $z_i\leftarrow-\infty$ when $z_i<z_{(k)}$ | $z_{(k)}$ = $k$-th largest logit | `models/sampling.py:34` |
+| 18 | Nucleus (top-$p$) filter | keep the smallest $m$ with $\sum_{i\le m}p_{(i)}\ge p$ | sorted descending; the most likely token is always kept | `models/sampling.py:52` |
+| 19 | Repetition penalty | $z_i\leftarrow z_i/\lambda$ if $z_i>0$, else $\lambda z_i$ | for already-generated ids; $\lambda=1.0$ means off | `models/sampling.py:23` |
+| 20 | Predictive entropy | $H(p)=-\sum_i p_i\log p_i\in[0,\ln V]$ | natural log, so **nats**; $\ln V$ = uniform guessing | `models/sampling.py:76` |
+| 21 | Reported log-probability | $\log p_i$ on the **untruncated** softmax at the same $T$ | top-$p$ would renormalise a certain token to $\log 1 = 0$ | `models/sampling.py:154` |
+| 22 | KV cache | $K_{t}=[\,K_{<t}\,;\,k_t\,]$, attend over the concatenation | $O(T)$ per generated token instead of $O(T^2)$ | `models/gpt.py:53` |
+| 23 | Steps per epoch | $\left\lfloor \dfrac{N_{train}}{B\cdot T_{blk}}\right\rfloor$ | $B$ batch size, $T_{blk}$ block size | `features/training/service.py:72` |
+| 24 | Perplexity | $\mathrm{PPL}=e^{\mathcal{L}}$, comparable as $\mathcal{L}$ per character | only comparable within one tokenizer | reported as `val loss` |
+| 25 | Forward-pass cost | $\mathrm{FLOPs}\approx 6N+12LHd^2T$ | $N$ parameters, $L$ layers, $H$ heads, $d$ hidden, $T$ tokens | `models/builder.py:26` |
+| 26 | Machine statistics | $\mu=\frac1n\sum x_i$, $\sigma^2=\frac1n\sum(x_i-\mu)^2$, $\rho=\frac{\mathrm{Cov}}{\sigma_X\sigma_Y}$ | scan inputs: CPU, RAM, cores, per-process cost | `core/system.py` |
+| 27 | CPU utilisation | $100\left(1-\frac{\Delta\,\mathrm{idle}}{\Delta\,\mathrm{idle}+\Delta\,\mathrm{kernel}+\Delta\,\mathrm{user}}\right)$ | counters are cumulative since boot, so **differences** of two samples | `core/system.py:164` (psutil), `:204` (Win32 `GetSystemTimes`) |
+Four conventions that the table alone would hide:
+
+- **Padding is excluded, not predicted.** Targets of `-1` are dropped from the
+  mean (`ignore_index=-1`), so a padded position contributes no loss term.
+- **No label smoothing.** The target is exactly one-hot; smoothing
+  ($\mathcal{L} = (1-\varepsilon)\mathcal{L}_{x_t} + \frac{\varepsilon}{V}\sum_i \mathcal{L}_i$)
+  is deliberately not applied, because the point of this project is to report
+  the model's real uncertainty.
+- **Everything is in nats.** Loss, entropy and log-probabilities all use the
+  natural log, so $\ln V$ is the no-information baseline. Divide by
+  $\ln 2 = 0.693$ for bits.
+- **Log-probability is measured before truncation.** A token drawn after top-$p$
+  collapse still reports its probability under the untouched softmax at the same
+  temperature, which is the model's own uncertainty rather than an artefact of
+  the filter.
+
+The classification formulas that are deliberately *absent* — accuracy, precision,
+recall, $F_1$, confusion matrix — are listed with their reasons in
+[Deliberately not implemented](#-deliberately-not-implemented).
+
+**Notation key.** One row per symbol, so no formula above needs a detour to
+read:
+
+| Symbol | Means | Symbol | Means |
+|---|---|---|---|
+| $T$ | tokens in one training block, or in the sampled window | $\theta$ | the full parameter vector of the network |
+| $t$ | index of a token position, $1 \dots T$ | $\epsilon$ | numerical floor ($10^{-8}$ in AdamW, $10^{-5}$ in LayerNorm) |
+| $x_t$ | the **target** token at position $t$ (the one that came next) | $\alpha$, $\eta_{max}$ | learning rate, its peak value |
+| $z$, $z_t$ | logits, before softmax | $\eta_{min}$ | learning-rate floor after decay |
+| $p_i$ | probability of token id $i$ | $\eta_t$, $T_w$ | learning rate at step $t$, warmup length |
+| $V$ | vocabulary size: 50257 (GPT-2 BPE) or 257 (byte-level) | $\tau$ | gradient-clipping threshold (1.0) |
+| $d$ | hidden width (`n_embd`) | $\lambda$ | weight decay (0.1) or repetition penalty ($\ge 1$) |
+| $L$ | number of transformer blocks | $g_t$, $\hat m_t$, $\hat v_t$ | gradient, its first and second moment |
+| $H$ | number of attention heads (`n_head` in the code) | $\beta_1$, $\beta_2$ | moment decay rates (0.9, 0.95) |
+| $d_k$ | per-head width, $d/H$ | $p$ | nucleus mass (top-$p$) or schedule progress |
+| $Q,K,V$ | query, key, value matrices | $k$ | number of tokens kept by top-$k$ |
+| $W, b$ | weight matrix, bias vector | $B$, $T_{blk}$ | micro-batch size, block (context) length |
+| $\gamma$, $\beta$ | LayerNorm scale and shift (not Adam's $\beta$) | $N$, $N_{train}$ | parameter count, training tokens |
+| $\odot$ | elementwise (Hadamard) product | $\Phi$ | standard normal CDF |
+| $\mu$, $\sigma^2$, $\sigma$ | mean, variance, standard deviation | $\rho$ | Pearson correlation |
+| $m, v$ | Adam's uncorrected moments | $\lVert g\rVert_2$ | Euclidean norm of the gradient |
+| $F$ | attention or MLP sublayer | $\ln$, $e$ | natural logarithm, $e^x$ |
+
 ### The one loss function this project trains
 
 Language modelling is next-token prediction. For a token sequence
@@ -861,20 +938,26 @@ $$
 \theta_{t+1} = \theta_t - \alpha\left(\frac{\hat{m}_t}{1-\beta_1^t}\right)\Bigg/\left(\sqrt{\frac{\hat{v}_t}{1-\beta_2^t}} + \epsilon\right)
 $$
 
-That is AdamW's update, where $g_t = \nabla_\theta\mathcal{L}$ and
-$\beta_1 = 0.9$, $\beta_2 = 0.999$. Dividing by $\sqrt{\hat v_t}$ makes the step
+That is AdamW's update, where $g_t = \nabla_\theta\mathcal{L}$ and this project
+uses $\beta_1 = 0.9$, $\beta_2 = 0.95$ (`core/config.py`), $\epsilon = 10^{-8}$
+— note that $\beta_2$, not the canonical $0.999$: this trainer runs short,
+CPU-sized runs where the extra memory of a slower-decaying second moment buys
+nothing. Dividing by $\sqrt{\hat v_t}$ makes the step
 size roughly $\alpha$ regardless of gradient magnitude, and the bias correction
 $m/(1-\beta^t)$ fixes the fact that $\hat m_t$ and $\hat v_t$ start at zero and
 would otherwise bias the first steps towards zero. **Decoupled** weight decay
 (`AdamW`) applies the penalty to the weights directly instead of folding it into
-the gradient, which decouples it from the adaptive rescaling.
+the gradient, which decouples it from the adaptive rescaling; it is applied to
+matrices only ($p.\mathrm{dim} \ge 2$), never to biases or LayerNorm gains, with
+$\lambda = 0.1$.
 
 Three more pieces of the training loop:
 
 | | Formula | Where |
 |---|---|---|
-| gradient clipping | $\min(1,\ \tau/\lVert g\rVert_2)\cdot g$ | bounds a single bad batch |
-| warmup + cosine decay | $\eta_t = \eta_{min} + \tfrac12(\eta_{max}-\eta_{min})(1+\cos(\pi t/T))$ | the `lr` column in every loss table |
+| gradient clipping | $\min(1,\ \tau/\lVert g\rVert_2)\cdot g$ | bounds a single bad batch; $\tau = 1.0$ |
+| linear warmup | $\eta_t = \eta_{max}\dfrac{t+1}{T_w}$ for $t < T_w$ | $T_w = \max(10, 0.05\,T)$ — 5% of the run |
+| cosine decay | $\eta_t = \eta_{min} + \tfrac12(\eta_{max}-\eta_{min})(1+\cos(\pi p))$, $p = (t-T_w)/(T-T_w)$ | the `lr` column in every loss table; $\eta_{max}=3\times10^{-4}$, $\eta_{min}=3\times10^{-5}$ |
 | backpropagation | $\dfrac{\partial \mathcal{L}}{\partial w} = \dfrac{\partial \mathcal{L}}{\partial a}\cdot\dfrac{\partial a}{\partial w}$, applied by the chain rule backwards through every op | `loss.backward()` |
 
 ### Sampling, and why temperature is a division
@@ -1607,6 +1690,7 @@ Notable defects caught during the audit and regression-tested:
 | `/v1/completions` hardcoded `"logprobs": null` and `finish_reason: "length"` | clients could not score the model, and an eos stop was reported as a full-length one |
 | `data tokens` sent the default corpus to `fetch_corpus` | `ValueError: source kind 'wikipedia' is handled by the data service`, so the one command that only reads text could not inspect the default corpus at all |
 | A lab test called `lab.main(["--register-only"])` for real | it returns 1 when jupyterlab is absent, so all four CI jobs failed on a machine-dependent test while the local suite passed |
+| The optimiser section documented $\beta_2 = 0.999$ | the code uses `beta2 = 0.95`; the README described Adam's textbook default, not this project's |
 
 ---
 
