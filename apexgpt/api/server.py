@@ -18,10 +18,13 @@ Run with::
 """
 import argparse
 import json
+import math
+import os
 import sys
 import threading
 import time
 
+from .. import __version__
 from ..features.inference.service import GenerationRequest, InferenceEngine
 
 _LOCK = threading.Lock()   # one generation at a time; the engine is not reentrant
@@ -61,6 +64,15 @@ def _pydantic_models():
         text: str
         prompt_tokens: int
         elapsed_s: float
+        finish_reason: str = "length"
+        logprobs: dict | None = None
+
+    class PredictResponse(BaseModel):
+        prompt: str
+        tokenizer: str
+        entropy_nats: float
+        uniform_entropy_nats: float
+        predictions: list[dict]
 
     class CompletionRequest(BaseModel):
         """OpenAI-compatible subset of ``/v1/completions``."""
@@ -74,7 +86,7 @@ def _pydantic_models():
         seed: int | None = None
         stop: list[str] | None = None
 
-    return GenerateRequest, GenerateResponse, CompletionRequest
+    return GenerateRequest, GenerateResponse, PredictResponse, CompletionRequest
 
 
 def create_app(engine: InferenceEngine, streaming: bool = True):
@@ -88,12 +100,13 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
             "Install the API extra first:  pip install -r requirements-api.txt"
         ) from exc
 
-    GenerateRequest, GenerateResponse, CompletionRequest = _pydantic_models()
+    (GenerateRequest, GenerateResponse, PredictResponse,
+     CompletionRequest) = _pydantic_models()
 
     app = FastAPI(
         title="ApexGPT inference API",
-        version="1.2.0",
-        description="Next-token generation from a ApexGPT GPT checkpoint.",
+        version=__version__,
+        description="Next-token generation from an ApexGPT GPT checkpoint.",
     )
 
     @app.get("/health")
@@ -107,12 +120,36 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
         request = req.to_request()
         with _LOCK:
             t0 = time.time()
-            text = engine.generate_text(request)
+            text, details = engine.generate_with_details(request)
             elapsed = time.time() - t0
         return GenerateResponse(
             text=text,
             prompt_tokens=len(engine.tokenizer(request.prompt)["input_ids"]),
             elapsed_s=round(elapsed, 4),
+            finish_reason=details["finish_reason"],
+            logprobs=details["logprobs"],
+        )
+
+    @app.post("/predict", response_model=PredictResponse)
+    def predict(req: GenerateRequest):
+        """Rank the next token without sampling anything.
+
+        The same answer ``apexgpt generate --predict`` prints, for programs that
+        want the distribution rather than a continuation: a client-side
+        autocomplete, a confidence gate, or a scorer.
+        """
+        request = req.to_request()
+        top_k = req.top_k or 10
+        with _LOCK:
+            rows, entropy = engine.predict_next_with_entropy(
+                req.prompt, top_k=top_k, temperature=1.0)
+        vocab = engine.metadata().get("vocab_size") or 0
+        return PredictResponse(
+            prompt=req.prompt,
+            tokenizer=engine.tokenizer_kind or "gpt2",
+            entropy_nats=round(entropy, 6),
+            uniform_entropy_nats=round(math.log(vocab), 6) if vocab > 1 else 0.0,
+            predictions=[row.as_dict() for row in rows],
         )
 
     if streaming:
@@ -141,8 +178,8 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
 
             def events():
                 yield f"data: {json.dumps({'type': 'meta', **engine.metadata()})}\n\n"
-                for piece in engine.stream(request):
-                    yield f"data: {json.dumps({'type': 'token', 'token': piece})}\n\n"
+                for step in engine.stream_steps(request):
+                    yield f"data: {json.dumps({'type': 'token', **step.as_dict()})}\n\n"
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
             # this handler must NOT be a generator function, otherwise FastAPI
@@ -174,7 +211,7 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
                                 content={"error": {"message": str(exc), "type": "invalid_request_error"}})
         with _LOCK:
             t0 = time.time()
-            text = engine.generate_text(request)
+            text, details = engine.generate_with_details(request)
             elapsed = time.time() - t0
         prompt_tokens = len(engine.tokenizer(request.prompt)["input_ids"])
         completion_tokens = max(0, len(engine.tokenizer(text)["input_ids"]) - prompt_tokens)
@@ -186,8 +223,10 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
             "choices": [{
                 "index": 0,
                 "text": text,
-                "logprobs": None,
-                "finish_reason": "length",
+                # was hardcoded to None: the per-token logprobs are the model's
+                # own uncertainty and the engine already has them
+                "logprobs": details["logprobs"],
+                "finish_reason": details["finish_reason"],
             }],
             "usage": {
                 "prompt_tokens": prompt_tokens,
@@ -195,6 +234,26 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
                 "total_tokens": prompt_tokens + completion_tokens,
             },
             "apexgpt": {"elapsed_s": round(elapsed, 4), **engine.metadata()},
+        }
+
+    @app.get("/v1/models")
+    def openai_models():
+        """Model discovery: OpenAI clients probe this before anything else."""
+        meta = engine.metadata()
+        created = int(os.path.getmtime(meta["checkpoint"])) if meta.get(
+            "checkpoint") and os.path.exists(meta["checkpoint"]) else 0
+        return {
+            "object": "list",
+            "data": [{
+                "id": "apexgpt",
+                "object": "model",
+                "created": created,
+                "owned_by": "apexgpt",
+                "root": str(meta.get("checkpoint", "")),
+                "parameters": meta.get("parameters"),
+                "tokenizer": meta.get("tokenizer"),
+                "context_length": meta.get("block_size"),
+            }],
         }
 
     return app

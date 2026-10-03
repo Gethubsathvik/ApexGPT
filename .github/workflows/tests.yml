@@ -1,0 +1,83 @@
+name: tests
+
+# The suite is CPU-only and needs no trained checkpoint, so it runs on every
+# push and pull request. The optional extras (Tk, FastAPI, jupyterlab, kagglehub)
+# are installed so the API and GUI suites do not silently skip themselves.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-api.txt
+
+      # The CPU wheel: no runner needs a GPU, and the tests never use one.
+      - name: Install torch (CPU build)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install the project and its extras
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-api.txt
+          python -m pip install pytest
+          python -m pip install -e .
+
+      - name: Show what the scan resolved
+        run: python -m apexgpt env --no-load-scan
+
+      - name: Run the tests
+        run: python -m pytest tests
+
+      - name: Verify the notebook kernel spec and the package layout
+        run: |
+          python -m apexgpt lab --check
+          python -m apexgpt doctor
+
+  package:
+    name: build + install the wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install torch (CPU build) and build tools
+        run: |
+          python -m pip install --upgrade pip build
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Build the wheel and sdist
+        run: python -m build
+
+      - name: Install the wheel and run the CLI from it
+        run: |
+          python -m pip install dist/apexgpt-*.whl
+          apexgpt --help
+          python -c "import apexgpt, apexgpt.core.paths as p; print(apexgpt.__version__, p.ROOT)"

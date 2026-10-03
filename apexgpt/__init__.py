@@ -13,6 +13,6 @@ view/controller that drives it. Nothing in ``features`` imports from another
 feature, so slices can be extracted into standalone services later.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 __all__ = ["__version__"]

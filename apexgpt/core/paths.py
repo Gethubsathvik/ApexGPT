@@ -9,7 +9,28 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent.parent
+
+def _project_root(package_file: Path | str | None = None) -> Path:
+    """Where artifacts belong.
+
+    Cloned or pip-installed with ``-e``, that is the repository. Copied into an
+    interpreter's ``site-packages`` there is no project at all, and writing
+    checkpoints next to ``site-packages`` is never what anyone wants - so an
+    installed copy uses the working directory instead.
+
+    ``package_file`` is the module's own path; it is a parameter only so the
+    rule can be tested without installing anything.
+    """
+    here = Path(package_file or __file__).resolve().parent.parent.parent
+    # pyproject.toml and requirements.txt only exist together in a checkout;
+    # neither is ever installed into site-packages
+    if any((here / marker).exists() for marker in ("pyproject.toml",
+                                                    "requirements.txt")):
+        return here
+    return Path.cwd()
+
+
+ROOT = _project_root()
 
 DATA_ROOT = Path(os.environ.get("APEXGPT_DATA_DIR") or (ROOT / "data")).resolve()
 

@@ -135,6 +135,29 @@ def test_clear_empties_the_output(app):
     assert app.output.get("1.0", "end").strip() == ""
 
 
+def test_the_next_token_panel_is_on_by_default_and_survives_a_run(app):
+    assert app.predict_next.get() is True
+    app.prompt.delete("1.0", "end")
+    app.prompt.insert("1.0", "The capital city of")
+    app.vars["max_new_tokens"].set(6)
+    app.start()
+    _run(app)
+    text = app.output.get("1.0", "end")
+    assert "next token:" in text
+    assert "entropy" in text and "nats" in text
+
+
+def test_the_next_token_panel_can_be_turned_off(app):
+    app.predict_next.set(False)
+    app.prompt.delete("1.0", "end")
+    app.prompt.insert("1.0", "The capital city of")
+    app.vars["max_new_tokens"].set(6)
+    app.start()
+    _run(app)
+    assert "next token:" not in app.output.get("1.0", "end")
+    app.predict_next.set(True)
+
+
 def test_stop_button_halts_generation(app):
     app.prompt.delete("1.0", "end")
     app.prompt.insert("1.0", "In a distant galaxy")

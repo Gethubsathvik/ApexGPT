@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/pytorch-2.4%2B-ee4c2c.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-312%20passing-success.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-338%20passing-success.svg)](tests)
 
 ---
 
@@ -48,7 +48,7 @@
 - Next-token prediction with AdamW, warmup + cosine decay, and gradient clipping
 - Samples with **temperature, top-k, top-p**, and repetition penalty
 - Four front ends over one implementation: **CLI**, **Tkinter GUI**, **Jupyter Lab**, **HTTP service**
-- **Automated tests** — 312 of them, covering causality, the KV cache, sampling, portability, corpus fetching, the live system scan, the next-token distribution, notebooks and the GUI
+- **Automated tests** — 338 of them, covering causality, the KV cache, sampling, portability, corpus fetching, the live system scan, the next-token distribution, notebooks and the GUI
 
 ---
 
@@ -299,6 +299,16 @@ All commands share one entry point:
 ```bash
 python -m apexgpt            # list every command
 python -m apexgpt train --help
+```
+
+Installing the package instead of running it from the clone gives you an
+`apexgpt` command as well, and keeps the checkpoints and corpora next to you
+rather than inside `site-packages`:
+
+```bash
+pip install -e .             # or: pip install .
+apexgpt env
+apexgpt train --preset smoke
 ```
 
 ---
@@ -1283,7 +1293,8 @@ python -m apexgpt gui
 A dark-themed Tk window: prompt box, **real-time token-by-token streaming** on
 a background thread (the UI never freezes), live sliders for temperature,
 top-k, top-p, max tokens, seed and repetition penalty, a KV-cache toggle, a
-**Stop** button mid-generation, and a tok/s readout.
+**Show next token** panel that prints the ranked candidates before generation
+starts, a **Stop** button mid-generation, and a tok/s readout.
 
 > The 30M model produces word-like but incoherent text. That is the model, not
 > the GUI — lower the temperature to `0.1` and output becomes repetitive, which
@@ -1303,9 +1314,11 @@ python -m apexgpt serve --host 0.0.0.0 --port 8000
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/health` | GET | liveness + model metadata |
-| `/generate` | POST | one-shot generation, JSON in / JSON out |
+| `/generate` | POST | one-shot generation, JSON in / JSON out, with logprobs |
+| `/predict` | POST | the ranked next-token distribution, nothing sampled |
 | `/stream` | GET | server-sent events, one `data:` line per token |
 | `/v1/completions` | POST | OpenAI-compatible alias for third-party clients |
+| `/v1/models` | GET | model discovery, which OpenAI clients probe first |
 | `/docs` | GET | interactive OpenAPI docs |
 
 ```bash
@@ -1315,18 +1328,22 @@ curl -X POST http://localhost:8000/generate \
   -H "Content-Type: application/json" \
   -d '{"prompt":"The history of the city is","max_new_tokens":40,"temperature":0.8}'
 
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"The history of the city is","top_k":5}'
+
 curl -N "http://localhost:8000/stream?prompt=hello&max_new_tokens=20"
 ```
 
 ```
 data: {"type": "meta", "parameters_m": 30.0, ...}
-data: {"type": "token", "token": " List"}
-data: {"type": "token", "token": " Faction"}
+data: {"type": "token", "text": " List", "token_id": 2534, "logprob": -1.83, "stop_reason": null}
+data: {"type": "token", "text": " Faction", "token_id": 18965, "logprob": -2.41, "stop_reason": null}
 data: {"type": "done"}
 ```
 
-The OpenAI-compatible alias returns the standard envelope, so clients written
-against that API work unmodified:
+Every event carries the token's own log-probability — the number the training
+loop minimises — so a client can score the model instead of only reading it:
 
 ```bash
 curl -X POST http://localhost:8000/v1/completions \
@@ -1338,11 +1355,20 @@ curl -X POST http://localhost:8000/v1/completions \
 {
   "id": "cmpl-1759000000",
   "object": "text_completion",
-  "choices": [{"index": 0, "text": "...", "logprobs": null, "finish_reason": "length"}],
+  "choices": [{
+    "index": 0,
+    "text": "...",
+    "logprobs": {"tokens": [" List", " Faction"], "token_logprobs": [-1.83, -2.41]},
+    "finish_reason": "length"
+  }],
   "usage": {"prompt_tokens": 2, "completion_tokens": 20, "total_tokens": 22},
   "apexgpt": {"elapsed_s": 0.31, "device": "cuda:0", "...": "..."}
 }
 ```
+
+`logprobs` used to be hardcoded to `null` and `finish_reason` to `"length"`; both
+are now measured — `finish_reason` is `eos` when the model emitted the end token
+and `length` when it ran out of budget.
 
 > `stream: true` is refused there with a `400` pointing at `/stream`: OpenAI
 > streams token objects, ApexGPT streams bare text, and faking that shape would
@@ -1411,6 +1437,11 @@ pip install pytest httpx
 python -m pytest tests -q
 ```
 
+Every push and pull request runs the suite on Linux and Windows (Python 3.11 and
+3.13) in [`.github/workflows/tests.yml`](.github/workflows/tests.yml), plus a
+second job that builds the wheel and runs `apexgpt --help` from the installed
+package — so packaging cannot rot unnoticed.
+
 | File | Covers |
 |------|--------|
 | `tests/test_model.py` | architecture, causality, KV cache, sampling, LR schedule |
@@ -1420,11 +1451,11 @@ python -m pytest tests -q
 | `tests/test_system.py` | live CPU/RAM/disk/process probes, their fallbacks, threshold arithmetic |
 | `tests/test_environment.py` | the scan: spec, requirements, settings, overrides, load scan, shell export, CLI |
 | `tests/test_tokenizers.py` | byte-level vocabulary, corpus specs, checkpoint metadata, per-tokenizer decoding |
-| `tests/test_predict_and_hub.py` | next-token distribution and entropy, prediction CLI, Hub/Kaggle capability, `--allow` plumbing |
+| `tests/test_predict_and_hub.py` | next-token distribution and entropy, per-token logprobs, stop reasons, prediction CLI, Hub/Kaggle capability, `--allow` plumbing |
 | `tests/test_lab.py` | kernel spec, notebook integrity, Lab CLI, a notebook executed in a real kernel |
-| `tests/test_package.py` | every module imports, CLI wiring, layout |
-| `tests/test_gui.py` | real Tk window, streaming, Stop button |
-| `tests/test_api.py` | HTTP endpoints, SSE, validation, OpenAPI |
+| `tests/test_package.py` | every module imports, CLI wiring, layout, `pyproject.toml`, artifact paths, CI workflow |
+| `tests/test_gui.py` | real Tk window, streaming, next-token panel, Stop button |
+| `tests/test_api.py` | HTTP endpoints, SSE, logprobs, model discovery, validation, OpenAPI |
 
 The tests that matter most are the ones that catch **silent** bugs: that a
 causal mask leaks no future tokens, that cached decoding matches a full forward
@@ -1459,6 +1490,8 @@ ApexGPT/
 ├── data/binary/<corpus>/       # train.bin, val.bin (uint16)
 ├── data/hub/                   # Hugging Face / Kaggle downloads
 ├── apexgpt.settings.json       # persisted overrides (written by --save-settings)
+├── pyproject.toml              # packaging: pip install -e . -> the apexgpt command
+├── .github/workflows/tests.yml # CI: pytest on Linux/Windows, wheel build
 ├── requirements.txt
 ├── requirements-api.txt
 ├── requirements-hub.txt
@@ -1496,6 +1529,9 @@ Notable defects caught during the audit and regression-tested:
 | Windows `System Idle Process` (pid 0) in the process table | topped the "busiest processes" list forever, at a nonsense 200% CPU |
 | `hub model --allow … --predict …` | the file patterns were dropped, so a 3.5 GB repo downloaded in full |
 | `tokenizer(...)` assumed a `BatchEncoding` | `AttributeError` on any tokenizer that returns a plain dict |
+| The GUI's next-token panel read a Tk variable from the worker thread | `RuntimeError: main thread is not in main loop` — the same trap as the earlier streaming bug |
+| `PROJECT_ROOT` was `parent.parent.parent` unconditionally | an installed copy wrote checkpoints and corpora into `site-packages` |
+| `/v1/completions` hardcoded `"logprobs": null` and `finish_reason: "length"` | clients could not score the model, and an eos stop was reported as a full-length one |
 
 ---
 

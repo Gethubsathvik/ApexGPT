@@ -8,6 +8,7 @@ to the CLI and the HTTP API.
 from __future__ import annotations
 
 import argparse
+import math
 import queue
 import sys
 import threading
@@ -105,6 +106,9 @@ class ApexGPTApp:
         ttk.Button(bar, text="Clear", command=self.clear).pack(side="left")
         self.use_cache = tk.BooleanVar(value=True)
         ttk.Checkbutton(bar, text="KV cache", variable=self.use_cache).pack(side="left", padx=14)
+        self.predict_next = tk.BooleanVar(value=True)
+        ttk.Checkbutton(bar, text="Show next token",
+                        variable=self.predict_next).pack(side="left")
         ttk.Button(bar, text="Quit", command=self.root.destroy).pack(side="right")
         self.status = ttk.Label(bar, text="ready", style="Stat.TLabel")
         self.status.pack(side="right", padx=10)
@@ -196,18 +200,37 @@ class ApexGPTApp:
         self.btn_stop.configure(state="normal")
         self.status.configure(text="generating...")
 
-        self.thread = threading.Thread(target=self._worker, args=(request,), daemon=True)
+        # Tcl variables are read here, on the UI thread, and passed to the
+        # worker as plain values: touching them from the worker raises
+        # "main thread is not in main loop"
+        show_prediction = bool(self.predict_next.get())
+        self.thread = threading.Thread(target=self._worker,
+                                       args=(request, show_prediction),
+                                       daemon=True)
         self.thread.start()
 
     def stop(self) -> None:
         self.stop_flag.set()
         self.status.configure(text="stopping...")
 
-    def _worker(self, request: GenerationRequest) -> None:
+    def _worker(self, request: GenerationRequest, show_prediction: bool = True) -> None:
         import time
         t0 = time.time()
         count = 0
         try:
+            if show_prediction:
+                # what the model expects before it writes anything; the same
+                # table `generate --predict` prints
+                rows, entropy = self.engine.predict_next_with_entropy(
+                    request.prompt, top_k=5, temperature=1.0)
+                vocab = self.engine.metadata().get("vocab_size") or 0
+                lines = ["next token: " + "  ".join(
+                    f"{r.label} {r.probability:.1%}" for r in rows)]
+                lines.append(f"top-{len(rows)} of {vocab:,} tokens, "
+                             f"entropy {entropy:.2f} nats "
+                             f"(uniform {math.log(vocab):.2f})" if vocab > 1
+                             else f"top-{len(rows)}, entropy {entropy:.2f} nats")
+                self.events.put(("meta", "\n".join(lines) + "\n"))
             for piece in self.engine.stream(request):
                 if self.stop_flag.is_set():
                     self.events.put(("meta", "\n[stopped by user]\n"))

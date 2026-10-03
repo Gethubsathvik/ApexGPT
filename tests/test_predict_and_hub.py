@@ -133,6 +133,130 @@ def test_prediction_labels_whitespace_so_a_row_is_readable():
 
 
 # --------------------------------------------------------------------------- #
+# per-token logprobs and stop reasons
+# --------------------------------------------------------------------------- #
+def test_stream_steps_reports_a_logprob_per_token(tmp_path):
+    engine = _engine(tmp_path)
+    # stop_on_eos off: the stub's eos id is 0, and a random model will hit it
+    request = GenerationRequest(prompt="hello", max_new_tokens=5, temperature=0.8,
+                                seed=1, stop_on_eos=False)
+    steps = list(engine.stream_steps(request))
+    assert len(steps) == 5
+    assert all(isinstance(s.token_id, int) and s.token_id >= 0 for s in steps)
+    assert all(s.logprob <= 0.0 for s in steps)
+    assert "".join(s.text for s in steps) == engine.generate_text(request)
+
+
+def test_only_the_last_step_is_finished_and_says_why(tmp_path):
+    engine = _engine(tmp_path)
+    steps = list(engine.stream_steps(GenerationRequest(
+        prompt="hello", max_new_tokens=4, temperature=0.0)))
+    assert not any(s.finished for s in steps[:-1])
+    assert steps[-1].finished and steps[-1].stop_reason == "length"
+    assert steps[-1].as_dict()["stop_reason"] == "length"
+
+
+def test_greedy_decoding_reports_a_zero_logprob(tmp_path):
+    engine = _engine(tmp_path)
+    steps = list(engine.stream_steps(GenerationRequest(
+        prompt="hello", max_new_tokens=3, temperature=0.0)))
+    assert [s.logprob for s in steps] == [0.0, 0.0, 0.0]
+
+
+def test_generate_with_details_is_the_openai_logprobs_shape(tmp_path):
+    engine = _engine(tmp_path)
+    text, details = engine.generate_with_details(GenerationRequest(
+        prompt="hello", max_new_tokens=4, temperature=0.8, seed=2))
+    logprobs = details["logprobs"]
+    assert len(logprobs["tokens"]) == len(logprobs["token_logprobs"]) == 4
+    assert logprobs["tokens"] == list(text)
+    assert details["generated_tokens"] == 4
+    assert details["finish_reason"] == "length"
+
+
+def test_filtered_probs_is_a_distribution_even_when_everything_is_filtered():
+    from apexgpt.models.sampling import filtered_probs
+
+    logits = torch.tensor([[0.0, 5.0, 7.0]])
+    probs = filtered_probs(logits, top_k=1)
+    assert probs.shape == logits.shape
+    assert float(probs.sum()) == pytest.approx(1.0, abs=1e-6)
+    # top_k=1 is a one-hot on the argmax, not a broken all-zero row
+    assert float(probs[0, 2]) == pytest.approx(1.0, abs=1e-6)
+    assert float(probs[0, 0]) == 0.0 and float(probs[0, 1]) == 0.0
+
+
+def test_greedy_filtered_probs_is_one_hot_on_the_argmax():
+    from apexgpt.models.sampling import filtered_probs
+
+    logits = torch.tensor([[0.0, 5.0, 7.0, -1.0]])
+    probs = filtered_probs(logits, temperature=0.0)
+    assert int(probs.argmax()) == 2
+    assert float(probs.sum()) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_sample_next_token_with_logprob_agrees_with_the_drawn_token():
+    from apexgpt.models.sampling import (filtered_probs,
+                                         sample_next_token_with_logprob)
+
+    logits = torch.tensor([[0.0, 4.0, 1.0, -2.0]])
+    torch.manual_seed(0)
+    ids, logprob = sample_next_token_with_logprob(logits, temperature=1.0)
+    torch.manual_seed(0)
+    again = sample_next_token_with_logprob(logits, temperature=1.0)[0]
+    assert int(ids) == int(again)
+    probs = filtered_probs(logits, temperature=1.0)
+    assert float(logprob) == pytest.approx(
+        float(probs[0, int(ids)].clamp_min(1e-12).log()), abs=1e-5)
+
+
+def test_logprobs_are_measured_before_top_p_truncates():
+    """A renormalised top-p of 1.0 would report every sure token as free."""
+    from apexgpt.models.sampling import sample_next_token_with_logprob
+
+    # one token holds most of the mass, so top_p=0.5 keeps only that one
+    logits = torch.tensor([[6.0, 0.0, 0.0, 0.0]])
+    probs = torch.softmax(logits, dim=-1)
+    assert float(probs[0, 0]) > 0.95
+
+    ids, logprob = sample_next_token_with_logprob(logits, temperature=1.0, top_p=0.5)
+    assert int(ids) == 0                     # top_p collapsed onto it
+    assert float(logprob) < 0.0              # not the 0.0 of a one-hot filter
+    assert float(logprob) == pytest.approx(
+        float(probs[0, 0].clamp_min(1e-12).log()), abs=1e-5)
+
+
+def test_logprob_is_tempered_when_the_sampler_is_tempered():
+    from apexgpt.models.sampling import sample_next_token_with_logprob
+
+    logits = torch.tensor([[1.0, 0.0, -1.0]])
+    # top_k=1 pins the same token, so only the temperature can move the number
+    _ids, cold = sample_next_token_with_logprob(logits, temperature=0.5, top_k=1)
+    _ids, hot = sample_next_token_with_logprob(logits, temperature=2.0, top_k=1)
+    # a flatter temperature spreads the mass, so even the favourite token is
+    # less probable and its log-probability drops
+    assert float(hot) < float(cold)
+    assert float(cold) == pytest.approx(
+        float(torch.softmax(logits / 0.5, dim=-1)[0, 0].log()), abs=1e-5)
+
+
+def test_sampling_paths_still_agree_with_each_other():
+    """filtered_probs is a refactor; the drawn token must not have changed."""
+    from apexgpt.models.sampling import sample_next_token
+
+    logits = torch.tensor([[0.5, 3.0, -1.0, 2.0, 0.1]])
+    for temperature in (0.0, 0.5, 1.0, 1.7):
+        torch.manual_seed(11)
+        first = sample_next_token(logits, temperature=temperature, top_k=3,
+                                  top_p=0.9)
+        torch.manual_seed(11)
+        second = sample_next_token(logits, temperature=temperature, top_k=3,
+                                   top_p=0.9)
+        assert int(first) == int(second)
+        assert 0 <= int(first) < logits.size(-1)
+
+
+# --------------------------------------------------------------------------- #
 # hub
 # --------------------------------------------------------------------------- #
 def test_hub_check_reports_every_capability():

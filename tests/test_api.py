@@ -6,6 +6,7 @@ stays fast and never needs a trained checkpoint.
 from __future__ import annotations
 
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -58,10 +59,15 @@ def test_generate_returns_text_and_token_counts(client):
     r = client.post("/generate", json={"prompt": "Hi", "max_new_tokens": 4})
     assert r.status_code == 200
     body = r.json()
-    assert set(body) == {"text", "prompt_tokens", "elapsed_s"}
+    assert set(body) == {"text", "prompt_tokens", "elapsed_s", "finish_reason",
+                         "logprobs"}
     assert isinstance(body["text"], str)
     assert body["prompt_tokens"] > 0
     assert body["elapsed_s"] >= 0
+    assert body["finish_reason"] == "length"
+    # one logprob per generated token, and they are negative or zero
+    assert len(body["logprobs"]["tokens"]) == 4
+    assert all(lp <= 0 for lp in body["logprobs"]["token_logprobs"])
 
 
 def test_generate_rejects_an_empty_prompt(client):
@@ -83,8 +89,53 @@ def test_stream_emits_meta_then_tokens_then_done(client):
                   if line.startswith("data: ")]
     assert events[0]["type"] == "meta"
     assert events[-1]["type"] == "done"
-    tokens = [e["token"] for e in events if e["type"] == "token"]
+    tokens = [e for e in events if e["type"] == "token"]
     assert len(tokens) == 3
+    # each event carries the token and how surprised the model was by it
+    assert all(isinstance(e["text"], str) for e in tokens)
+    assert all(e["logprob"] <= 0 for e in tokens)
+    assert all(e["token_id"] >= 0 for e in tokens)
+
+
+# ------------------------------------------------------------------ predict
+def test_predict_ranks_the_distribution_without_generating(client):
+    r = client.post("/predict", json={"prompt": "Hi", "top_k": 5})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["prompt"] == "Hi"
+    assert body["tokenizer"] == "gpt2"
+    assert len(body["predictions"]) == 5
+    ranks = [p["rank"] for p in body["predictions"]]
+    assert ranks == [1, 2, 3, 4, 5]
+    probs = [p["probability"] for p in body["predictions"]]
+    assert probs == sorted(probs, reverse=True)
+    assert all(0.0 <= p <= 1.0 for p in probs)
+    assert all(p["text"] is not None for p in body["predictions"])
+
+
+def test_predict_reports_entropy_against_a_uniform_model(client):
+    body = client.post("/predict", json={"prompt": "Hi", "top_k": 3}).json()
+    vocab = client.get("/health").json()["model"]["vocab_size"]
+    assert body["uniform_entropy_nats"] == pytest.approx(math.log(vocab), abs=1e-4)
+    # an untrained model cannot beat uniform, but it must still be a real number
+    assert 0.0 <= body["entropy_nats"] <= body["uniform_entropy_nats"] + 1e-6
+
+
+def test_predict_validates_like_generate(client):
+    assert client.post("/predict", json={"prompt": ""}).status_code == 422
+    assert client.post("/predict", json={"prompt": "Hi",
+                                         "top_k": -1}).status_code == 422
+
+
+def test_model_discovery_lists_the_loaded_checkpoint(client):
+    body = client.get("/v1/models").json()
+    assert body["object"] == "list"
+    assert len(body["data"]) == 1
+    entry = body["data"][0]
+    assert entry["id"] == "apexgpt"
+    assert entry["tokenizer"] == "gpt2"
+    assert entry["context_length"] > 0
+    assert entry["parameters"] > 0
 
 
 def test_stream_can_be_disabled(engine):
@@ -102,6 +153,11 @@ def test_openai_alias_has_the_documented_shape(client):
     assert body["model"] == "apexgpt"
     assert len(body["choices"]) == 1
     assert body["choices"][0]["finish_reason"] == "length"
+    # was a hardcoded None; now the model's own uncertainty per token
+    logprobs = body["choices"][0]["logprobs"]
+    assert len(logprobs["tokens"]) == 4
+    assert len(logprobs["token_logprobs"]) == 4
+    assert all(lp <= 0 for lp in logprobs["token_logprobs"])
     usage = body["usage"]
     assert usage["total_tokens"] == (usage["prompt_tokens"]
                                       + usage["completion_tokens"])
@@ -127,5 +183,6 @@ def test_openai_alias_validates_like_the_native_route(client):
 # ------------------------------------------------------------------ openapi
 def test_openapi_documents_every_public_route(client):
     paths = client.get("/openapi.json").json()["paths"]
-    for path in ("/health", "/generate", "/stream", "/v1/completions"):
+    for path in ("/health", "/generate", "/predict", "/stream",
+                 "/v1/completions", "/v1/models"):
         assert path in paths, f"{path} missing from the OpenAPI schema"

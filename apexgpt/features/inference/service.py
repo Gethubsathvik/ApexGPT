@@ -98,6 +98,22 @@ class Prediction:
 
 
 @dataclass
+class Step:
+    """One generated token, with what the model thought of it."""
+
+    text: str
+    token_id: int
+    logprob: float
+    finished: bool = False
+    stop_reason: str = ""
+
+    def as_dict(self) -> dict:
+        return {"text": self.text, "token_id": self.token_id,
+                "logprob": round(self.logprob, 6),
+                "stop_reason": self.stop_reason or None}
+
+
+@dataclass
 class InferenceEngine:
     """Loads a checkpoint once and serves generation requests from it."""
     device: str = "auto"
@@ -165,9 +181,28 @@ class InferenceEngine:
 
     def generate_text(self, req: GenerationRequest) -> str:
         """Generate a full continuation and return the decoded text."""
-        req.validate()
-        pieces = list(self.stream(req))
-        return "".join(pieces)
+        return "".join(step.text for step in self.stream_steps(req))
+
+    def generate_with_details(self, req: GenerationRequest) -> tuple[str, dict]:
+        """``(text, details)`` where details carry the logprobs and stop reason.
+
+        ``details`` is the OpenAI-shaped ``logprobs`` payload plus ``finish_reason``,
+        which is what the HTTP service returns and what a caller scoring a model
+        needs.
+        """
+        steps = list(self.stream_steps(req))
+        text = "".join(step.text for step in steps)
+        finish = steps[-1].stop_reason if steps and steps[-1].finished else "length"
+        return text, {
+            "logprobs": {
+                "tokens": [step.text for step in steps],
+                "token_ids": [step.token_id for step in steps],
+                "token_logprobs": [round(step.logprob, 6) for step in steps],
+                "text_offset": [0],
+            },
+            "finish_reason": finish,
+            "generated_tokens": len(steps),
+        }
 
     def predict_next(self, prompt: str, top_k: int = 10,
                      temperature: float = 1.0) -> list[Prediction]:
@@ -217,6 +252,15 @@ class InferenceEngine:
 
     def stream(self, req: GenerationRequest):
         """Yield decoded text incrementally, one token at a time."""
+        for step in self.stream_steps(req):
+            yield step.text
+
+    def stream_steps(self, req: GenerationRequest):
+        """Yield a :class:`Step` per generated token: text, id, logprob, stop.
+
+        ``stream`` is this minus the bookkeeping, which keeps the HTTP API's
+        ``logprobs`` field honest without duplicating the decoding loop.
+        """
         req.validate()
         model, tokenizer = self.model, self.tokenizer
 
@@ -226,13 +270,13 @@ class InferenceEngine:
         ids = self._encode_prompt(req.prompt)
         kv = model.new_kv_caches() if req.use_cache else None
 
-        from ...models.sampling import sample_next_token
+        from ...models.sampling import sample_next_token_with_logprob
 
-        for _ in range(req.max_new_tokens):
+        for produced in range(req.max_new_tokens):
             idx_cond = ids[:, -model.cfg.block_size:]
             with torch.no_grad():
                 logits, _ = model(idx_cond, kv_caches=kv)
-                next_id = sample_next_token(
+                next_id, logprob = sample_next_token_with_logprob(
                     logits[:, -1, :],
                     temperature=req.temperature,
                     top_k=req.top_k,
@@ -242,6 +286,13 @@ class InferenceEngine:
                 )
             ids = torch.cat((ids, next_id), dim=1)
             token_id = next_id.item()
-            yield tokenizer.decode([token_id])
+            stop_reason = ""
             if req.stop_on_eos and token_id == tokenizer.eos_token_id:
+                stop_reason = "eos"
+            elif produced == req.max_new_tokens - 1:
+                stop_reason = "length"
+            yield Step(text=tokenizer.decode([token_id]), token_id=token_id,
+                       logprob=float(logprob), finished=bool(stop_reason),
+                       stop_reason=stop_reason)
+            if stop_reason == "eos":
                 return
