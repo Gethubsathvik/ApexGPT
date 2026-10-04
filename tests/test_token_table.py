@@ -11,8 +11,10 @@ import re
 
 import pytest
 
-from apexgpt.features.data.cli import build_parser, main, token_table
+from apexgpt.features.data.cli import (build_parser, corpus_path_for, main,
+                                      source_slug, token_table)
 from apexgpt.features.data.service import build_inventory
+from apexgpt.features.data.sources import resolve
 from apexgpt.features.data.tokenizers import load_tokenizer
 
 
@@ -176,3 +178,87 @@ def test_values_for_keeps_the_prompt_order(corpus, char_tokenizer):
     ids = [int(i) for i in
            char_tokenizer("ba", add_special_tokens=False)["input_ids"]]
     assert [v.token_id for v in inventory.values_for(ids, char_tokenizer)] == ids
+
+
+def test_two_local_files_are_not_read_from_one_cache(tmp_path, monkeypatch,
+                                                    capsys):
+    """A second ``local:`` file must not be answered with the first one's text.
+
+    Every ``local:`` spec resolves to the corpus key ``local``, so a cache named
+    after the key would hand the second file back the first file's tokens.
+    """
+    raw = tmp_path / "data"
+    monkeypatch.setenv("APEXGPT_DATA_DIR", str(raw))
+    first = tmp_path / "first.txt"
+    first.write_text("aaaa\n", encoding="utf-8")
+    second = tmp_path / "second.txt"
+    second.write_text("zzzz\n", encoding="utf-8")
+
+    assert main(["tokens", "--source", "local:" + str(first),
+                 "--tokenizer", "char", "--top", "2"]) == 0
+    assert "reading " + str(first) in capsys.readouterr().out
+
+    assert main(["tokens", "--source", "local:" + str(second),
+                 "--tokenizer", "char", "--top", "2"]) == 0
+    out = capsys.readouterr().out
+    assert "reading " + str(second) in out
+    assert str(first) not in out
+
+
+def test_a_local_text_file_is_read_where_it_lies(tmp_path, monkeypatch):
+    source = tmp_path / "notes.md"
+    source.write_text("hello\n", encoding="utf-8")
+    assert corpus_path_for(resolve("local:" + str(source)),
+                           tmp_path / "raw") == source
+
+
+def test_a_converted_local_file_is_cached_under_its_own_name(tmp_path):
+    source = tmp_path / "rows.csv"
+    source.write_text("alpha,beta\n", encoding="utf-8")
+    cached = corpus_path_for(resolve("local:" + str(source)), tmp_path / "raw")
+    assert cached.parent == tmp_path / "raw"
+    assert cached.name.endswith("-rows.txt")
+    assert cached.read_text(encoding="utf-8") == "alpha beta\n"
+
+
+def test_two_local_files_of_one_name_get_different_cache_slugs(tmp_path):
+    raw = tmp_path / "raw"
+    paths = []
+    for folder in ("a", "b"):
+        directory = tmp_path / folder
+        directory.mkdir()
+        source = directory / "x.csv"
+        source.write_text("one,two\n", encoding="utf-8")
+        paths.append(corpus_path_for(resolve("local:" + str(source)), raw))
+    assert len(set(paths)) == 2
+
+
+def test_the_slug_survives_a_long_path(tmp_path):
+    deep = tmp_path / "a" / "b" / "c" / "d"
+    deep.mkdir(parents=True)
+    source = deep / "corpus.csv"
+    source.write_text("x,y\n", encoding="utf-8")
+    cached = corpus_path_for(resolve("local:" + str(source)), tmp_path / "raw")
+    assert cached.name == "d-corpus.txt"
+
+
+def test_a_url_corpus_is_named_after_its_url():
+    assert source_slug(resolve("url:https://example.com/dir/My Corpus.txt")) \
+        == "example.com-dir-My-Corpus"
+
+
+def test_a_kaggle_corpus_is_named_after_its_slug():
+    assert source_slug(resolve("kaggle:owner/dataset-slug")) \
+        == "owner-dataset-slug"
+
+
+def test_the_local_source_hint_names_the_source_not_just_the_key(tmp_path,
+                                                                 monkeypatch,
+                                                                 capsys):
+    source = tmp_path / "local.txt"
+    source.write_text("abab\n", encoding="utf-8")
+    monkeypatch.setenv("APEXGPT_DATA_DIR", str(tmp_path / "data"))
+    main(["tokens", "--source", "local:" + str(source), "--tokenizer", "char"])
+    out = capsys.readouterr().out
+    assert f"data prepare --source local:{source}" in out
+    assert "train --dataset local --tokenizer char" in out

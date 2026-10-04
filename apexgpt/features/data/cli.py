@@ -169,7 +169,9 @@ def _tokens_command(args, corpus, cfg) -> int:
     if args.source and corpus.kind in ("local", "text-url", "hf-stream", "kaggle"):
         # a local file or a URL needs no index: tokenize it where it lies
         corpus_path = corpus_path_for(corpus, cfg.data.raw_dir)
+        one_off = True
     else:
+        one_off = False
         if not cfg.data.corpus_path.exists():
             if corpus.kind == "wikipedia":
                 print("[error] the Wikipedia corpus is not built. This command "
@@ -193,19 +195,68 @@ def _tokens_command(args, corpus, cfg) -> int:
     token_table(corpus_path, tokenizer, top=args.top, limit=args.limit,
                 show_text=args.slice_at, predict=args.predict,
                 top_k=args.top_k)
-    print(f"\ntrain a model on it:  python -m apexgpt train "
+    if one_off:
+        print(f"\nbuild it for training:  python -m apexgpt data prepare "
+              f"--source {args.source} --tokenizer {cfg.data.tokenizer}")
+    print(f"train a model on it:  python -m apexgpt train "
           f"--dataset {corpus.key} --tokenizer {cfg.data.tokenizer}")
     print("model's own ranking:  python -m apexgpt generate --predict 8")
     return 0
 
 
 def corpus_path_for(corpus, raw_dir):
-    """Where a one-off ``local:``/``url:`` corpus is read from."""
+    """Where a one-off ``local:``/``url:`` corpus is read from.
+
+    A local plain-text file is read where it lies: copying it into the cache
+    would put every ``local:`` spec on the same ``<key>.txt`` path, so the
+    second file read would silently report the first one's tokens. Formats
+    that need converting, and remote sources, get a cache file named after
+    the source instead of after the corpus key, which all of them share
+    (``local``, ``url``, ``kaggle``).
+    """
+    from pathlib import Path
+
     from .sources import fetch_corpus
 
-    target = raw_dir / corpus.key / f"{corpus.key}.txt"
+    if corpus.kind == "local":
+        source = Path(corpus.locator).expanduser()
+        if not source.exists():
+            raise FileNotFoundError(f"local corpus not found: {source}")
+        if source.suffix.lower() in ("", ".txt", ".md"):
+            return source
+
+    target = Path(raw_dir) / f"{source_slug(corpus)}.txt"
     target.parent.mkdir(parents=True, exist_ok=True)
     return fetch_corpus(corpus, target, raw_dir, target_mb=50)
+
+
+def source_slug(corpus) -> str:
+    """A filesystem-safe cache name that identifies the source, not the kind.
+
+    A file name on its own is not an identity: ``a/train.csv`` and
+    ``b/train.csv`` are different corpora. The directory a source sits in goes
+    into the name too, and for a URL the host, so two one-off corpora cannot
+    land on one cache file.
+    """
+    import re
+    from pathlib import Path
+    from urllib.parse import urlsplit
+
+    locator = corpus.locator or corpus.key
+    if corpus.kind == "text-url":
+        parts = urlsplit(locator)
+        trail = [part for part in parts.path.strip("/").split("/") if part]
+        head = [parts.netloc] if parts.netloc else []
+    else:
+        trail = [part for part in Path(locator).parts
+                 if part not in (".", "..", "\\", "/") and not part.endswith(":")]
+        head = []
+    if not trail:
+        return corpus.key
+
+    stem = Path(trail[-1]).stem or trail[-1]
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", "-".join([*head, *trail[-2:-1], stem]))
+    return slug.strip("-.")[-64:] or corpus.key
 
 
 def build_parser() -> argparse.ArgumentParser:
