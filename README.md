@@ -7,6 +7,39 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-375%20tests-success.svg)](tests)
 
+## 📁 Project layout
+
+```
+ApexGPT/
+├── apexgpt/
+│   ├── __main__.py            # single command dispatcher
+│   ├── core/                  # config, paths, device, environment, seeding, system, text
+│   ├── models/                # gpt.py, builder.py, sampling.py: M
+│   ├── features/
+│   │   ├── data/              # service.py, cli.py, sources.py, tokenizers.py
+│   │   ├── training/          # service.py, cli.py
+│   │   ├── inference/         # service.py, cli.py, gui.py
+│   │   └── hub/               # service.py, cli.py: Hugging Face / Kaggle
+│   ├── api/server.py           # optional FastAPI service
+│   └── tools/                  # setup.py, env.py, doctor.py, lab.py, notebook_sources.py
+├── notebooks/                  # generated .ipynb: environment, train, inference
+├── docs/                       # reference material split out of this README
+├── tests/                      # one file per feature, plus conftest.py
+├── models/runs/<name>/         # checkpoint.pt, history.json, loss_curves.png
+├── data/raw/<corpus>/          # cached corpus text
+├── data/binary/<corpus>/       # train.bin, val.bin (uint16)
+├── data/hub/                   # Hugging Face / Kaggle downloads
+├── apexgpt.settings.json       # persisted overrides (written by --save-settings)
+├── pyproject.toml              # packaging: pip install -e . -> the apexgpt command
+├── .github/workflows/tests.yml   # CI: pytest on Linux/Windows, wheel build
+├── .github/workflows/release.yml # a v* tag becomes a GitHub Release
+├── requirements.txt
+├── requirements-api.txt
+├── requirements-hub.txt
+├── requirements-notebook.txt
+└── README.md
+```
+
 ---
 
 ## 📑 Contents
@@ -931,40 +964,6 @@ run there instead of quietly skipping.
 
 ---
 
-## 📁 Project layout
-
-```
-ApexGPT/
-├── apexgpt/
-│   ├── __main__.py            # single command dispatcher
-│   ├── core/                  # config, paths, device, environment, seeding, system, text
-│   ├── models/                # gpt.py, builder.py, sampling.py: M
-│   ├── features/
-│   │   ├── data/              # service.py, cli.py, sources.py, tokenizers.py
-│   │   ├── training/          # service.py, cli.py
-│   │   ├── inference/         # service.py, cli.py, gui.py
-│   │   └── hub/               # service.py, cli.py: Hugging Face / Kaggle
-│   ├── api/server.py           # optional FastAPI service
-│   └── tools/                  # setup.py, env.py, doctor.py, lab.py, notebook_sources.py
-├── notebooks/                  # generated .ipynb: environment, train, inference
-├── docs/                       # reference material split out of this README
-├── tests/                      # one file per feature, plus conftest.py
-├── models/runs/<name>/         # checkpoint.pt, history.json, loss_curves.png
-├── data/raw/<corpus>/          # cached corpus text
-├── data/binary/<corpus>/       # train.bin, val.bin (uint16)
-├── data/hub/                   # Hugging Face / Kaggle downloads
-├── apexgpt.settings.json       # persisted overrides (written by --save-settings)
-├── pyproject.toml              # packaging: pip install -e . -> the apexgpt command
-├── .github/workflows/tests.yml   # CI: pytest on Linux/Windows, wheel build
-├── .github/workflows/release.yml # a v* tag becomes a GitHub Release
-├── requirements.txt
-├── requirements-api.txt
-├── requirements-hub.txt
-├── requirements-notebook.txt
-└── README.md
-```
-
----
 
 ## 🐛 Bugs found and fixed
 
@@ -982,3 +981,4 @@ MIT — see [LICENSE](LICENSE).
 - **Dataset (default)** — [`wikimedia/wikipedia`](https://huggingface.co/datasets/wikimedia/wikipedia) `20231101.en`
 - **Corpora** — [Tiny Shakespeare](https://github.com/karpathy/char-rnn) · [WikiText](https://huggingface.co/datasets/Salesforce/wikitext) · [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) · [OpenWebText](https://huggingface.co/datasets/Skylion007/openwebtext)
 - **Tokenizer** — GPT-2 BPE, vocab 50257
+
