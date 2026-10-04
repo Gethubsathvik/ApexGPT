@@ -39,38 +39,109 @@ ApexGPT/
 ├── requirements-notebook.txt
 └── README.md
 ```
+---
 
+## 🏗️ Architecture (MVC + service + feature-based)
+
+Three organising principles, applied together. The tree at the top of this file
+is the same picture with every file named; this is what each part is *for*.
+
+**MVC mapping**
+
+| Layer | Location | Responsibility |
+|-------|----------|----------------|
+| **Model** | `models/` | Architecture and sampling maths |
+| **Service** | `features/*/service.py`, `core/environment.py` | Business logic: data, training, generation, configuration |
+| **View** | `features/*/cli.py`, `gui.py`, `tools/*.py`, `notebooks/` | Presentation only — no model logic |
+| **Controller** | `cli.py` entry points | Parse args → call service → render |
+
+**Why feature-based.** Each feature is a complete vertical — its service plus
+its views. `features/training` does not import from `features/inference`, so
+any slice can be lifted out into its own deployable without touching the rest.
+
+**Why one service, not microservices.** Splitting data preparation and training
+into separate network processes would add ports, health checks and
+partial-failure modes to a workflow that is offline and single-user, without
+making it better. So ApexGPT ships exactly one deployable — the inference API
+— and keeps every other boundary a clean in-process service interface.
+---
+
+## 📐 Mathematics behind ApexGPT
+
+Every formula in this table is implemented here, and the last column names the
+file that does it. The derivations, the notation key and the formulas that are
+deliberately *not* used are in
+[docs/mathematics.md](docs/mathematics.md).
+
+| What it computes | Formula | Notation | Implemented |
+|---|---|---|---|
+| Training objective | $\mathcal{L} = -\frac{1}{T}\sum_{t=1}^{T}\log\,\mathrm{softmax}(z_t)_{x_t}$ | $T$ tokens per block, $z_t$ the logits at position $t$, $x_t$ the token that came next | `models/gpt.py:229` |
+| Output distribution | $p_i = \dfrac{e^{z_i}}{\sum_{j=1}^{V}e^{z_j}}$ | $z\in\mathbb{R}^{V}$ logits, $V$ the vocabulary (50257 or 257) | `models/sampling.py:103` |
+| Causal attention | $\mathrm{Attn}(Q,K,V)=\mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V$ | $Q=XW_Q$, $K=XW_K$, $V=XW_V$, $d_k=d/H$ | `models/gpt.py:63` |
+| Causality mask | $M_{ij}=0$ for $j\le i$, $-\infty$ otherwise | $-\infty$ kills the softmax term, so no token sees its future | `models/gpt.py:71` |
+| Nonlinearity | $\mathrm{GELU}(z)=z\,\Phi(z)$ | $\Phi$ = standard normal CDF | `models/gpt.py:88` |
+| Layer normalisation | $\mathrm{LN}(z)=\gamma\odot\frac{z-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta$ | $\mu,\sigma^2$ over the $d$ features of one token | `nn.LayerNorm` |
+| Residual path | $x \leftarrow x + F(\mathrm{LN}(x))$ | pre-norm: the skip connection stays an identity | `models/gpt.py:107` |
+| Inverted dropout | $\tilde{z}_i=\frac{z_i}{1-p}\cdot m_i,\quad m_i\sim\mathrm{Bernoulli}(1-p)$ | $p=0.1$; scaled while training, identity at inference | `models/gpt.py:40` |
+| AdamW | $\theta\leftarrow\theta-\alpha\frac{\hat m_t/(1-\beta_1^t)}{\sqrt{\hat v_t/(1-\beta_2^t)}+\epsilon}$ | $\beta_1=0.9$, $\beta_2=0.95$, $\epsilon=10^{-8}$ | `features/training/service.py:65` |
+| Learning rate | warmup $\eta_t=\eta_{max}\frac{t+1}{T_w}$, then $\eta_t=\eta_{min}+\frac12(\eta_{max}-\eta_{min})(1+\cos\pi p)$ | $T_w=\max(10,0.05T)$ warmup steps, $p$ decay progress | `features/training/service.py:48` |
+| Gradient clipping | $g\leftarrow g\cdot\min\!\left(1,\frac{\tau}{\lVert g\rVert_2}\right)$ | $\tau=1.0$ | `features/training/service.py:307` |
+| Temperature | $p_i=\frac{\exp(z_i/T)}{\sum_j\exp(z_j/T)}$ | $T>1$ flattens, $T<1$ sharpens, $T\le 0$ is greedy `argmax` | `models/sampling.py:98` |
+| Top-$k$ | $z_i\leftarrow-\infty$ when $z_i<z_{(k)}$ | $z_{(k)}$ = the $k$-th largest logit | `models/sampling.py:34` |
+| Nucleus (top-$p$) | keep the smallest $m$ with $\sum_{i\le m}p_{(i)}\ge p$ | sorted descending; the most likely token is always kept | `models/sampling.py:52` |
+| Predictive entropy | $H(p)=-\sum_i p_i\log p_i\in[0,\ln V]$ | natural log, so **nats**; $\ln V$ = guessing uniformly | `models/sampling.py:76` |
+| Perplexity | $\mathrm{PPL}=e^{\mathcal{L}}$, compared as $\mathcal{L}$ per character | only comparable within one tokenizer | reported as `val loss` |
+
+Four conventions the table alone would hide:
+
+- **Padding is excluded, not predicted.** Targets of `-1` are dropped from the
+  mean (`ignore_index=-1`), so a padded position contributes no loss term.
+- **No label smoothing.** The target is exactly one-hot, because the point of
+  this project is to report the model's real uncertainty.
+- **Everything is in nats**, so $\ln V$ is the no-information baseline. Divide
+  by $\ln 2 = 0.693$ for bits.
+- **Log-probabilities are measured before truncation**, on the untouched
+  softmax at the same temperature, so a top-$p$ collapse cannot report a
+  certain token as $\log 1 = 0$.
 ---
 
 ## 📑 Contents
 
+- [📁 Project layout](#%F0%9F%93%81-project-layout)
+- [🏗️ Architecture (MVC + service + feature-based)](#%F0%9F%8F%97%EF%B8%8F-architecture-mvc--service--feature-based)
+- [📐 Mathematics behind ApexGPT](#%F0%9F%93%90-mathematics-behind-apexgpt)
 - [✨ What it does](#%E2%9C%A8-what-it-does)
 - [🖥️ Reference configuration](#%F0%9F%96%A5%EF%B8%8F-reference-configuration)
+- [💻 Hardware portability](#%F0%9F%92%BB-hardware-portability)
 - [🔍 Environment scan](#%F0%9F%94%8D-environment-scan)
 - [🚀 Quick start](#%F0%9F%9A%80-quick-start)
+- [🪟 Windows](#%F0%9F%AA%9F-windows)
+- [🐧 Linux](#%F0%9F%90%A7-linux)
+- [🍎 macOS](#%F0%9F%8D%8E-macos)
 - [📓 Jupyter Lab](#%F0%9F%93%93-jupyter-lab)
 - [📚 Corpora](#%F0%9F%93%9A-corpora)
 - [🎭 Tiny Shakespeare in 5 minutes](#%F0%9F%8E%AD-tiny-shakespeare-in-5-minutes)
-- [🏗️ Architecture (MVC + service + feature-based)](#%F0%9F%8F%97%EF%B8%8F-architecture-mvc--service--feature-based)
 - [🤖 Model](#%F0%9F%A4%96-model)
 - [🔤 Tokenizers](#%F0%9F%94%A4-tokenizers)
 - [🎓 Training](#%F0%9F%8E%93-training)
 - [💬 Inference](#%F0%9F%92%AC-inference)
+- [🌐 Hugging Face & Kaggle](#%F0%9F%8C%90-hugging-face--kaggle)
 - [🖥️ GUI](#%F0%9F%96%A5%EF%B8%8F-gui)
+- [🌐 HTTP API](#%F0%9F%8C%90-http-api)
+- [🤖 Android](#%F0%9F%A4%96-android)
 - [🧪 Tests](#%F0%9F%A7%AA-tests)
-- [📁 Project layout](#%F0%9F%93%81-project-layout)
+- [🐛 Bugs found and fixed](#%F0%9F%90%9B-bugs-found-and-fixed)
 
 Reference material, in `docs/`:
 
-- [📐 The mathematics behind ApexGPT](docs/mathematics.md) - Every formula the code implements, and why each one is shaped the way it is.
-- [💻 Hardware portability](docs/portability.md) - Every backend ApexGPT probes for, what it costs, and what happens when one is absent.
-- [🪟 Platform setup](docs/platform-setup.md) - Per-platform dependencies, and the installs that need more than `pip`.
-- [🌐 HTTP API](docs/http-api.md) - The inference service: one command, every endpoint, and how to reach it from another machine.
-- [🌐 Hugging Face & Kaggle](docs/hub.md) - Pretrained models, hub datasets, and the reference training scripts.
-- [🤖 Android](docs/android.md) - Driving the inference API from a phone.
-- [📏 Measured](docs/measurements.md) - Runs of this repository, recorded: the tokenizer comparison and two completed trainings.
-- [🐛 Bugs found and fixed](docs/bugs-found-and-fixed.md) - Defects this project found in itself, and what each one taught.
-
+- [The mathematics behind ApexGPT](docs/mathematics.md) - Every formula the code implements, and why each one is shaped the way it is.
+- [Hardware portability](docs/portability.md) - Every backend ApexGPT probes for, what it costs, and what happens when one is absent.
+- [Platform setup](docs/platform-setup.md) - Per-platform dependencies, and the installs that need more than `pip`.
+- [HTTP API](docs/http-api.md) - The inference service: one command, every endpoint, and how to reach it from another machine.
+- [Hugging Face & Kaggle](docs/hub.md) - Pretrained models, hub datasets, and the reference training scripts.
+- [Android](docs/android.md) - Driving the inference API from a phone.
+- [Measured](docs/measurements.md) - Runs of this repository, recorded: the tokenizer comparison and two completed trainings.
+- [Bugs found and fixed](docs/bugs-found-and-fixed.md) - Defects this project found in itself, and what each one taught.
 ---
 
 ## ✨ What it does
@@ -84,7 +155,6 @@ Reference material, in `docs/`:
 - Samples with **temperature, top-k, top-p**, and repetition penalty
 - Four front ends over one implementation: **CLI**, **Tkinter GUI**, **Jupyter Lab**, **HTTP service**
 - **Automated tests** — 375 of them, covering causality, the KV cache, sampling, portability, corpus fetching, the live system scan, the next-token distribution, notebooks and the GUI
-
 ---
 
 ## 🖥️ Reference configuration
@@ -130,7 +200,6 @@ Machine spec
 > A CPU without native bf16 emulates it, and checkpointing's recompute blocks
 > the fused attention path. This is detected, not hard-coded: CPUs with native
 > bf16 keep AMP on. Force either back on with `--amp` / `--checkpointing`.
-
 ---
 
 > **Run it on localhost, one line, no arguments:**
@@ -152,7 +221,6 @@ Machine spec
 ## 💻 Hardware portability
 
 Every backend ApexGPT probes, and what it does when one is missing: [docs/portability.md](docs/portability.md).
-
 ---
 
 ## 🔍 Environment scan
@@ -256,7 +324,6 @@ with its origin:
 Measured readings never persist themselves: they are re-taken on every run, so a
 value written while the machine was busy cannot freeze a stale measurement into
 the config.
-
 ---
 
 ## 🚀 Quick start
@@ -323,25 +390,21 @@ pip install -e .             # or: pip install .
 apexgpt env
 apexgpt train --preset smoke
 ```
-
 ---
 
 ## 🪟 Windows
 
 Dependencies and installs: [docs/platform-setup.md](docs/platform-setup.md).
-
 ---
 
 ## 🐧 Linux
 
 Dependencies and installs: [docs/platform-setup.md](docs/platform-setup.md).
-
 ---
 
 ## 🍎 macOS
 
 Dependencies and installs: [docs/platform-setup.md](docs/platform-setup.md).
-
 ---
 
 ## 📓 Jupyter Lab
@@ -392,7 +455,6 @@ outputs) and reports problems before launching.
 
 Notebook deps live in [`requirements-notebook.txt`](requirements-notebook.txt);
 nothing else in the project imports them.
-
 ---
 
 ## 📚 Corpora
@@ -531,7 +593,6 @@ Datasets, pretrained models and Kaggle datasets all have their own command —
 [🌐 Hugging Face & Kaggle](docs/hub.md#%F0%9F%8C%90-hugging-face--kaggle) covers `hub check`, `hub files`,
 `hub model`, `hub dataset` and `hub kaggle`, plus what `huggingface/transformers`
 and `huggingface/trl` are the equivalents of here.
-
 ---
 
 ## 🎭 Tiny Shakespeare in 5 minutes
@@ -596,64 +657,6 @@ Elizabethan cadence, with the sense falling apart — 30M parameters over 270k
 tokens is a budget of about 0.6 epochs. `wikitext` or `tinystories` at a larger
 step budget produces noticeably better English; the `full` preset on an NVIDIA
 GPU produces prose.
-
----
-
-## 🏗️ Architecture (MVC + service + feature-based)
-
-Three organising principles, applied together:
-
-```
-apexgpt/
-├── core/           cross-cutting: config, paths, device, environment, seeding
-│   └── environment.py     the one scan: spec, requirements, settings, apply
-│
-├── models/         ── M ── the domain model
-│   ├── gpt.py              GPT, attention, MLP, blocks, KV cache
-│   ├── builder.py          construction, parameter counts, reporting
-│   └── sampling.py         temperature / top-k / top-p / penalty
-│
-├── features/       ── feature-based vertical slices ──
-│   ├── data/                service.py + cli.py + sources.py (corpus registry)
-│   ├── training/            service.py  + cli.py
-│   └── inference/           service.py  + cli.py + gui.py
-│
-├── api/            the one standalone service
-│   └── server.py            optional FastAPI app
-│
-└── tools/          the operator-facing commands
-    ├── setup.py             install for this hardware
-    ├── env.py               scan, collect requirements, apply settings
-    ├── doctor.py            verify the environment
-    ├── lab.py               Jupyter Lab + the kernel spec
-    └── notebook_sources.py  generates notebooks/*.ipynb
-```
-
-**MVC mapping**
-
-| Layer | Location | Responsibility |
-|-------|----------|----------------|
-| **Model** | `models/` | Architecture and sampling maths |
-| **Service** | `features/*/service.py`, `core/environment.py` | Business logic: data, training, generation, configuration |
-| **View** | `features/*/cli.py`, `gui.py`, `tools/*.py`, `notebooks/` | Presentation only — no model logic |
-| **Controller** | `cli.py` entry points | Parse args → call service → render |
-
-**Why feature-based.** Each feature is a complete vertical — its service plus
-its views. `features/training` does not import from `features/inference`, so
-any slice can be lifted out into its own deployable without touching the rest.
-
-**Why one service, not microservices.** Splitting data preparation and training
-into separate network processes would add ports, health checks and
-partial-failure modes to a workflow that is offline and single-user, without
-making it better. So ApexGPT ships exactly one deployable — the inference API
-— and keeps every other boundary a clean in-process service interface.
-
----
-
-## 📐 The mathematics behind ApexGPT
-
-Every formula the code implements, with the notation key: [docs/mathematics.md](docs/mathematics.md).
-
 ---
 
 ## 🤖 Model
@@ -704,7 +707,6 @@ VRAM, `medium` at 12 GB, `cpu-tiny` at 8 GB, `smoke` on a 2-core machine.
 **KV cache** — cached decoding must use a *bottom-right aligned* mask. A plain
 `is_causal=True` would let every query attend to future keys; the tests assert
 cached decoding matches a full forward pass to `1e-4`.
-
 ---
 
 ## 🔤 Tokenizers
@@ -758,7 +760,6 @@ from the real corpus size and warns you), but for a laptop run use `--max-iters`
 At 460k tokens (~0.19% of one epoch) the model learns English word and sentence
 structure but not coherence. That is the expected result for 30M parameters at
 this budget: coherent output needs the `full` preset on an NVIDIA GPU.
-
 ---
 
 ## 💬 Inference
@@ -835,13 +836,11 @@ rows, entropy = engine.predict_next_with_entropy("To be, or not")
 ```
 
 `--interactive` prints the same table before every completion.
-
 ---
 
 ## 🌐 Hugging Face & Kaggle
 
 Pretrained models, hub datasets and the reference training scripts: [docs/hub.md](docs/hub.md).
-
 ---
 
 ## 🖥️ GUI
@@ -893,19 +892,16 @@ ids and says so, rather than inventing a frequency.
 > The 30M model produces word-like but incoherent text. That is the model, not
 > the GUI — lower the temperature to `0.1` and output becomes repetitive, which
 > confirms sampling is wired up correctly.
-
 ---
 
 ## 🌐 HTTP API
 
 The service in one command, then the full endpoint reference: [docs/http-api.md](docs/http-api.md).
-
 ---
 
 ## 🤖 Android
 
 Driving the API from a phone: [docs/android.md](docs/android.md).
-
 ---
 
 ## 🧪 Tests
@@ -961,14 +957,11 @@ The GUI, API and Jupyter suites skip themselves automatically when Tk, FastAPI
 or jupyterlab is unavailable, so the suite passes headless and without the
 notebook extras. CI installs the `notebook` extra anyway, so those suites really
 run there instead of quietly skipping.
-
 ---
-
 
 ## 🐛 Bugs found and fixed
 
 What was wrong, and what it cost: [docs/bugs-found-and-fixed.md](docs/bugs-found-and-fixed.md).
-
 ---
 
 ## 📄 License

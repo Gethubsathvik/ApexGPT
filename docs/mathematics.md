@@ -1,10 +1,5 @@
 # 📐 The mathematics behind ApexGPT
 
-Every formula the code implements, and why each one is shaped the way it is.
-
-
-# 📐 The mathematics behind ApexGPT
-
 Every formula below is either **used by this code** — with the file that
 implements it — or listed as **not used**, with the reason. Nothing is decorative.
 Where the distinction matters, the honest answer is more useful than a formula
