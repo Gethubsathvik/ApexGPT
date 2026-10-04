@@ -46,6 +46,32 @@ ApexGPT/
 Three organising principles, applied together. The tree at the top of this file
 is the same picture with every file named; this is what each part is *for*.
 
+**The path one block of text takes**, from the file on disk to the words on the
+screen. Every arrow is one module, and the four front ends all start at the top
+and end at the bottom — none of them skips a step:
+
+```
+Text                     a UTF-8 file on disk, one corpus or one prompt
+  ↓
+Tokenizer                data/tokenizers.py: GPT-2 byte-level BPE, or the 257-id
+  ↓                      byte-level vocabulary with --tokenizer char
+Token IDs                a flat uint16 stream; the same ids train, sample and count
+  ↓
+Token Embeddings         models/gpt.py: one nn.Embedding lookup, tied to the output layer
+  ↓
+Transformer Blocks       the chosen depth × width, each block pre-norm and residual
+  ↓
+Causal Self-Attention    models/gpt.py: Q, K, V per head, masked so no token sees its future
+  ↓
+Feed-Forward Network     models/gpt.py: two linear layers with GELU in between
+  ↓
+Output Logits            one score per vocabulary id, at every position
+  ↓
+Sampling                 models/sampling.py: temperature, top-k, top-p, repetition penalty
+  ↓
+Generated Text           decoded back to text and rendered by the CLI, GUI, notebook or API
+```
+
 **MVC mapping**
 
 | Layer | Location | Responsibility |
@@ -966,7 +992,7 @@ What was wrong, and what it cost: [docs/bugs-found-and-fixed.md](docs/bugs-found
 
 ## 📄 License
 
-MIT — see [LICENSE](MIT).
+MIT — see [LICENSE](LICENSE).
 
 ## 🔗 Links
 
