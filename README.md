@@ -309,6 +309,22 @@ python -m apexgpt train --preset auto       # train, sized to this machine
 python -m apexgpt gui                       # desktop GUI
 ```
 
+Prefer a released build to the clone? Every tag has one, built and checked by
+CI, and the wheel is pure Python — `torch` still comes from the platform
+install in `setup --install`:
+
+```bash
+pip install https://github.com/Gethubsathvik/ApexGPT/releases/download/v1.2.0/apexgpt-1.2.0-py3-none-any.whl
+python -m apexgpt setup --install
+python -m apexgpt doctor
+```
+
+Releases are cut by the [`release`](.github/workflows/release.yml) workflow, not
+by hand: push a `v*` tag whose version matches `pyproject.toml` and CI checks
+that the tagged commit's test run is green, builds the wheel and the sdist, runs
+`twine check`, refuses to ship a wheel carrying the tests or the corpus, and
+attaches both files to the release page. Nothing is uploaded to PyPI.
+
 All commands share one entry point:
 
 ```bash

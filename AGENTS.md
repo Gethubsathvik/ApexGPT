@@ -74,9 +74,21 @@ in the code — do not "fix" them in the repository.
 
 5. **A blocked DLL can surface as an unrelated ImportError.** `import datasets`
    fails inside `pyarrow.dataset` with "An Application Control policy has blocked
-   this file", which has nothing to do with datasets. `stream_hf_dataset` now
-   turns that into an actionable `RuntimeError`, and the one test that needs a
-   working pyarrow skips.
+   this file", which has nothing to do with datasets; the same policy later began
+   blocking `pyarrow._parquet`, which takes six `tests/test_package.py` tests
+   with it. The block is not a one-off at install time — it appeared hours later
+   on a package that had been loading all day, so treat a green local suite from
+   earlier in the day as no guarantee. `stream_hf_dataset` turns that import
+   failure into an actionable `RuntimeError`, and the tests that need a working
+   pyarrow skip rather than fail. CI installs its own and is unaffected.
+
+6. **A release is a tag, in that order.** Push the commit to `main`, wait for the
+   `tests` workflow to be green, bump `version` in `pyproject.toml`, then push
+   the tag. `.github/workflows/release.yml` refuses a tag whose commit has no
+   green `tests` run and refuses a tag that disagrees with the version, because
+   both mistakes produce an artifact nobody can install. `gh` is not installed
+   here, so releases are made by the workflow's own `GITHUB_TOKEN`; to undo one,
+   delete the tag.
 
 ## House rules
 

@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=68"]
+# 77 is where PEP 639 landed: `license` as a plain SPDX string, plus
+# `license-files`. Older setuptools cannot read it, and the table form it
+# replaces stops working in 2027.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,14 +10,14 @@ name = "apexgpt"
 version = "1.2.0"
 description = "A GPT-style transformer language model built from scratch in PyTorch"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 keywords = ["llm", "gpt", "transformer", "pytorch", "nlp", "education"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Education",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
