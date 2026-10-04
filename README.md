@@ -937,18 +937,18 @@ run there instead of quietly skipping.
 ApexGPT/
 ├── apexgpt/
 │   ├── __main__.py            # single command dispatcher
-│   ├── core/                   # config, paths, device, environment, system scan, text, seeding
-│   ├── models/                 # M: GPT architecture, builder, sampling
+│   ├── core/                  # config, paths, device, environment, seeding, system, text
+│   ├── models/                # gpt.py, builder.py, sampling.py: M
 │   ├── features/
-│   │   ├── data/               # service.py + cli.py + sources.py + tokenizers.py
-│   │   ├── training/           # service.py + cli.py
-│   │   ├── inference/          # service.py + cli.py + gui.py
-│   │   └── hub/                # service.py + cli.py: Hugging Face / Kaggle
+│   │   ├── data/              # service.py, cli.py, sources.py, tokenizers.py
+│   │   ├── training/          # service.py, cli.py
+│   │   ├── inference/         # service.py, cli.py, gui.py
+│   │   └── hub/               # service.py, cli.py: Hugging Face / Kaggle
 │   ├── api/server.py           # optional FastAPI service
-│   └── tools/                  # setup, env, doctor, lab, notebook_sources
+│   └── tools/                  # setup.py, env.py, doctor.py, lab.py, notebook_sources.py
 ├── notebooks/                  # generated .ipynb: environment, train, inference
 ├── docs/                       # reference material split out of this README
-├── tests/
+├── tests/                      # one file per feature, plus conftest.py
 ├── models/runs/<name>/         # checkpoint.pt, history.json, loss_curves.png
 ├── data/raw/<corpus>/          # cached corpus text
 ├── data/binary/<corpus>/       # train.bin, val.bin (uint16)
