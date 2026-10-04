@@ -1,0 +1,145 @@
+name: release
+
+# One tag publishes. Pushing v1.2.0 builds the wheel and the sdist, checks them,
+# and attaches them to a GitHub Release. Nothing here talks to PyPI, so a
+# mistake costs a deleted tag rather than a package name.
+#
+# tests.yml runs on pushes to main, not on tags, so this workflow does not
+# pretend to be the test suite: it refuses to publish a commit whose tests run
+# is not green, which is the order that makes a release reversible.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish, e.g. v1.2.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+
+  build:
+    name: build the distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: read          # to read the tests run of the tagged commit
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: The tagged commit must have a green tests run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          runs=$(gh api "repos/$REPOSITORY/commits/$SHA/check-runs?per_page=100" \
+                 --jq '.check_runs[] | select(.app.slug == "tests") | .name')
+          if [ -z "$runs" ]; then
+            echo "no tests run found for $SHA - push the commit to main first:" >&2
+            echo "https://github.com/$REPOSITORY/actions" >&2
+            exit 1
+          fi
+          echo "$runs" | while read -r name; do
+            [ -n "$name" ] && echo "tests job: $name"
+          done
+          failed=$(gh api "repos/$REPOSITORY/commits/$SHA/check-runs?per_page=100" \
+                   --jq '[.check_runs[] | select(.app.slug == "tests"
+                          and .conclusion != "success")] | length')
+          if [ "$failed" -ne 0 ]; then
+            echo "$failed tests job(s) did not pass for $SHA" >&2
+            exit 1
+          fi
+
+      - name: Build the wheel and sdist
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          ls -l dist
+          twine check dist/*
+
+      - name: The tag and the version must agree
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os, pathlib, tomllib
+          tag = os.environ["TAG"]
+          project = tomllib.loads(
+              pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          version = project["version"]
+          if tag != f"v{version}":
+              raise SystemExit(
+                  f"tag {tag} does not match the version in pyproject.toml ({version})."
+                  " Bump the version there first, so the tag and the artifact agree.")
+          print(f"{tag} matches version {version}")
+          PY
+
+      # The same check the test pipeline applies: a published artifact is what
+      # people install, so it must not carry the corpus or the tests.
+      - name: Check what the wheel contains
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          wheel = glob.glob("dist/apexgpt-*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          leaked = [n for n in names
+                    if n.split("/")[0] in {"tests", "notebooks", "data", "models", ".github"}]
+          print(f"{wheel}: {len(names)} entries")
+          assert not leaked, f"the wheel carries project files: {leaked}"
+          print("wheel is clean")
+          PY
+
+      - name: Hand the distributions to the publishing job
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: attach them to the GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write        # creating the release is the only write this needs
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Create the release, or replace its assets
+        run: |
+          ls -l dist
+          if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$REPOSITORY"
+          else
+            gh release create "$TAG" dist/* \
+              --repo "$REPOSITORY" \
+              --title "ApexGPT $TAG" \
+              --generate-notes
+          fi
+
+      - name: Show what the release now points at
+        run: gh release view "$TAG" --repo "$REPOSITORY"

@@ -155,6 +155,61 @@ def test_ci_pipeline_keeps_its_gates():
     assert "::error" in (root / "tests" / "conftest.py").read_text(encoding="utf-8")
 
 
+def test_the_release_workflow_publishes_a_tag_and_nothing_else():
+    """A release must be one tag push, and must not reach a package index.
+
+    The gates are the point: a tagged commit whose tests never passed is not a
+    release, a tag that disagrees with the version produces an artifact nobody
+    can install with ``pip install apexgpt==<tag>``, and an accidental upload to
+    PyPI cannot be taken back.
+    """
+    import yaml
+
+    root = Path(__file__).resolve().parent.parent
+    path = root / ".github" / "workflows" / "release.yml"
+    assert path.exists(), "there is no way to publish a release"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    triggers = workflow.get("on", workflow.get(True))
+
+    assert triggers["push"]["tags"] == ["v*"]
+    assert triggers["workflow_dispatch"]["inputs"]["tag"]["required"] is True
+    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["concurrency"]["cancel-in-progress"] is False
+
+    jobs = workflow["jobs"]
+    assert {"build", "publish"} <= set(jobs)
+    for name, job in jobs.items():
+        assert job.get("timeout-minutes"), f"job {name} can hang forever"
+
+    # least privilege, per job: the build reads, only the publish writes
+    assert jobs["build"]["permissions"] == {"contents": "read", "checks": "read"}
+    assert jobs["publish"]["permissions"] == {"contents": "write"}
+    assert jobs["publish"]["needs"] == "build"
+
+    build = yaml.safe_dump(jobs["build"])
+    for gate in ("python -m build", "twine check", "pyproject.toml",
+                 "check-runs", "upload-artifact"):
+        assert gate in build, f"the build job never does {gate}"
+
+    publish = yaml.safe_dump(jobs["publish"])
+    assert "download-artifact" in publish
+    assert "gh release create" in publish
+    for forbidden in ("pypi", "twine upload", "packages: write"):
+        assert forbidden not in publish.lower(), f"a release must not touch {forbidden}"
+
+
+def test_the_release_workflow_checks_the_wheel_the_pipeline_checks():
+    """The artifact people install gets the same cleanliness check, not a weaker one."""
+    root = Path(__file__).resolve().parent.parent
+    workflows = root / ".github" / "workflows"
+    package = (workflows / "tests.yml").read_text(encoding="utf-8")
+    release = (workflows / "release.yml").read_text(encoding="utf-8")
+
+    leaked = 'if n.split("/")[0] in {"tests", "notebooks", "data", "models", ".github"}'
+    assert leaked in package
+    assert leaked in release
+
+
 def test_no_source_file_is_hidden_by_gitignore():
     """Regression: `.gitignore` had `models/` and `data/`, which also match
     ``apexgpt/models/`` and ``apexgpt/features/data/`` - so the model layer and
