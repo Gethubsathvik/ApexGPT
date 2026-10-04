@@ -54,6 +54,22 @@ def test_health_reports_ok_and_metadata(client):
     assert body["model"]["n_layer"] == TINY_MODEL["n_layer"]
 
 
+# --------------------------------------------------------------------- root
+def test_the_bare_address_is_a_landing_page_not_a_404(client):
+    """``serve`` prints the root URL, so the root URL has to answer."""
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    body = r.text
+    for path in ("/docs", "/health", "/generate", "/predict", "/v1/completions"):
+        assert f'href="{path}"' in body
+    assert "cpu" in body                     # the model it is serving
+
+
+def test_the_favicon_request_is_answered_quietly(client):
+    assert client.get("/favicon.ico").status_code == 204
+
+
 # ----------------------------------------------------------------- generate
 def test_generate_returns_text_and_token_counts(client):
     r = client.post("/generate", json={"prompt": "Hi", "max_new_tokens": 4})

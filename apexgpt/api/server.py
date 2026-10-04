@@ -93,7 +93,8 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
     """Build the FastAPI application around a loaded engine."""
     try:
         from fastapi import FastAPI, Query
-        from fastapi.responses import JSONResponse, StreamingResponse
+        from fastapi.responses import (HTMLResponse, JSONResponse, Response,
+                                       StreamingResponse)
     except ImportError as exc:
         raise SystemExit(
             "FastAPI is not installed.\n"
@@ -108,6 +109,30 @@ def create_app(engine: InferenceEngine, streaming: bool = True):
         version=__version__,
         description="Next-token generation from an ApexGPT GPT checkpoint.",
     )
+
+    @app.get("/", response_class=HTMLResponse)
+    def index():
+        """A landing page, so the address in the banner is not a bare 404."""
+        meta = engine.metadata()
+        rows = "\n".join(
+            f'<li><a href="{path}"><code>{path}</code></a> &mdash; {note}</li>'
+            for path, note in (
+                ("/docs", "interactive documentation for every endpoint"),
+                ("/health", "liveness probe and model metadata"),
+                ("/generate", "POST a prompt, get a continuation"),
+                ("/predict", "POST a prompt, get the ranked next token"),
+                ("/stream", "server-sent events, one token at a time"),
+                ("/v1/completions", "OpenAI-compatible completions"),
+                ("/v1/models", "model discovery for OpenAI clients"),
+            ))
+        return (f"<h1>ApexGPT {__version__}</h1>"
+                f"<p>{meta['parameters_m']}M parameters, {meta['device']}, "
+                f"tokenizer {meta['tokenizer']}</p><ul>{rows}</ul>")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        """Browsers ask for this on every page; an empty answer keeps it quiet."""
+        return Response(status_code=204)
 
     @app.get("/health")
     def health():
