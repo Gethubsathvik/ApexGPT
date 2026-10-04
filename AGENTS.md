@@ -75,12 +75,15 @@ in the code — do not "fix" them in the repository.
 5. **A blocked DLL can surface as an unrelated ImportError.** `import datasets`
    fails inside `pyarrow.dataset` with "An Application Control policy has blocked
    this file", which has nothing to do with datasets; the same policy later began
-   blocking `pyarrow._parquet`, which takes six `tests/test_package.py` tests
-   with it. The block is not a one-off at install time — it appeared hours later
-   on a package that had been loading all day, so treat a green local suite from
-   earlier in the day as no guarantee. `stream_hf_dataset` turns that import
-   failure into an actionable `RuntimeError`, and the tests that need a working
-   pyarrow skip rather than fail. CI installs its own and is unaffected.
+   blocking `pyarrow._parquet`, and then `torch\lib\torch.dll` itself, which stops
+   collection of twelve test files with
+   `OSError: [WinError 4551]`. The block is not a one-off at install time — it
+   appeared hours later on packages that had been loading all day, so treat a
+   green local suite from earlier in the day as no guarantee, and treat an
+   unrunnable local suite as this rather than as a change that broke something.
+   `stream_hf_dataset` turns the datasets import failure into an actionable
+   `RuntimeError`, and the tests that need a working pyarrow skip rather than
+   fail. CI installs its own and is unaffected.
 
 6. **A release is a tag, in that order.** Push the commit to `main`, wait for the
    `tests` workflow to be green, bump `version` in `pyproject.toml`, then push

@@ -11,30 +11,32 @@
 
 ## 📑 Contents
 
-- [✨ What it does](#-what-it-does)
-- [🖥️ Reference configuration](#%EF%B8%8F-reference-configuration)
-- [💻 Hardware portability](#-hardware-portability)
-- [🔍 Environment scan](#-environment-scan)
-- [🚀 Quick start](#-quick-start)
-- [🪟 Windows](#-windows)
-- [🐧 Linux](#-linux)
-- [🍎 macOS](#-macos)
-- [📓 Jupyter Lab](#-jupyter-lab)
-- [📚 Corpora](#-corpora)
-- [🎭 Tiny Shakespeare in 5 minutes](#-tiny-shakespeare-in-5-minutes)
-- [🏗️ Architecture](#%EF%B8%8F-architecture-mvc--service--feature-based)
-- [📐 Mathematics](#%EF%B8%8F-the-mathematics-behind-apexgpt)
-- [🤖 Model](#-model)
-- [🔤 Tokenizers](#-tokenizers)
-- [🎓 Training](#-training)
-- [💬 Inference](#-inference)
-- [🌐 Hugging Face & Kaggle](#-hugging-face--kaggle)
-- [🖥️ GUI](#%EF%B8%8F-gui)
-- [🌐 HTTP API](#-http-api)
-- [🤖 Android](#-android)
-- [🧪 Tests](#-tests)
-- [📁 Layout](#-project-layout)
-- [🐛 Bugs found and fixed](#-bugs-found-and-fixed)
+- [✨ What it does](#%E2%9C%A8-what-it-does)
+- [🖥️ Reference configuration](#%F0%9F%96%A5%EF%B8%8F-reference-configuration)
+- [🔍 Environment scan](#%F0%9F%94%8D-environment-scan)
+- [🚀 Quick start](#%F0%9F%9A%80-quick-start)
+- [📓 Jupyter Lab](#%F0%9F%93%93-jupyter-lab)
+- [📚 Corpora](#%F0%9F%93%9A-corpora)
+- [🎭 Tiny Shakespeare in 5 minutes](#%F0%9F%8E%AD-tiny-shakespeare-in-5-minutes)
+- [🏗️ Architecture (MVC + service + feature-based)](#%F0%9F%8F%97%EF%B8%8F-architecture-mvc--service--feature-based)
+- [🤖 Model](#%F0%9F%A4%96-model)
+- [🔤 Tokenizers](#%F0%9F%94%A4-tokenizers)
+- [🎓 Training](#%F0%9F%8E%93-training)
+- [💬 Inference](#%F0%9F%92%AC-inference)
+- [🖥️ GUI](#%F0%9F%96%A5%EF%B8%8F-gui)
+- [🧪 Tests](#%F0%9F%A7%AA-tests)
+- [📁 Project layout](#%F0%9F%93%81-project-layout)
+
+Reference material, in `docs/`:
+
+- [📐 The mathematics behind ApexGPT](docs/mathematics.md) - Every formula the code implements, and why each one is shaped the way it is.
+- [💻 Hardware portability](docs/portability.md) - Every backend ApexGPT probes for, what it costs, and what happens when one is absent.
+- [🪟 Platform setup](docs/platform-setup.md) - Per-platform dependencies, and the installs that need more than `pip`.
+- [🌐 HTTP API](docs/http-api.md) - The inference service: one command, every endpoint, and how to reach it from another machine.
+- [🌐 Hugging Face & Kaggle](docs/hub.md) - Pretrained models, hub datasets, and the reference training scripts.
+- [🤖 Android](docs/android.md) - Driving the inference API from a phone.
+- [📏 Measured](docs/measurements.md) - Runs of this repository, recorded: the tokenizer comparison and two completed trainings.
+- [🐛 Bugs found and fixed](docs/bugs-found-and-fixed.md) - Defects this project found in itself, and what each one taught.
 
 ---
 
@@ -78,7 +80,7 @@ Machine spec
 > machine without one, `torch.cuda.is_available()` is `False` and training runs
 > on CPU. **Every entry point still auto-selects the best available backend**, so
 > the same code uses an NVIDIA GPU, an Intel GPU or Apple Metal with no edits —
-> see [Hardware portability](#-hardware-portability).
+> see [Hardware portability](docs/portability.md#%F0%9F%92%BB-hardware-portability).
 >
 > **2. All logical threads, 4 physical cores.** The thread count is what the
 > presets and the live scan size themselves around.
@@ -111,65 +113,12 @@ Machine spec
 > the defaults out with
 > `python -m apexgpt serve --host 127.0.0.1 --port 8000`; bind `0.0.0.0`
 > instead to let other machines on your network reach it. Full detail in
-> [🌐 HTTP API](#-http-api).
+> [🌐 HTTP API](docs/http-api.md#%F0%9F%8C%90-http-api).
+---
 
 ## 💻 Hardware portability
 
-ApexGPT has no hard-coded CUDA. `core/device.py` probes the machine once and every
-script follows the result.
-
-| Backend | Detected via | Precision policy | Checkpointing |
-|---------|---------------|------------------|---------------|
-| `cuda` | `torch.cuda.is_available()` (NVIDIA **or** an AMD ROCm build) | fp16 autocast + `GradScaler` | on when VRAM < 12 GB |
-| `xpu` | `torch.xpu.is_available()` | fp16 autocast + `GradScaler` | off |
-| `mps` | `torch.backends.mps.is_available()` | fp16 autocast | off |
-| `dml` | optional `torch-directml` package | fp32 (autocast is not honoured) | off |
-| `cpu` | always present | bf16 autocast **only if native**, else fp32 | off |
-
-```bash
-python -m apexgpt setup --backend auto   # detect backend, print the exact pip plan
-python -m apexgpt setup --install        # detect backend, then install
-python -m apexgpt doctor                 # report every backend, RAM, VRAM, threads
-```
-
-`setup` picks the wheel index that matches your hardware (cu124, cu121, rocm6.2,
-xpu, cpu, or the default Metal-capable wheel). Because that choice cannot be
-expressed as one pinned version, **`torch` is deliberately unpinned** in
-`requirements.txt` — see the comment at the top of that file.
-
-| Machine | Command |
-|---------|---------|
-| NVIDIA (any CUDA) | `python -m apexgpt setup --install` |
-| NVIDIA, pinned CUDA | `python -m apexgpt setup --backend cuda --cuda 121 --install` |
-| AMD ROCm (Linux) | `python -m apexgpt setup --backend rocm --rocm 6.2 --install` |
-| Intel GPU | `python -m apexgpt setup --backend xpu --install` |
-| Apple Silicon | `python -m apexgpt setup --install` (default wheel has Metal) |
-| AMD/Intel GPU on Windows | `python -m apexgpt setup --backend dml --install`, then `--device dml` |
-| CPU only | `python -m apexgpt setup --backend cpu --install` |
-| + Jupyter Lab | add `--notebook` |
-| + HTTP API | add `--api` |
-
-Device selection is automatic (`--device auto`, the default) but never silently
-wrong: asking for a backend that is absent is a hard error, not a CPU fallback.
-
-```bash
-python -m apexgpt train --device cuda:1     # multi-GPU index form
-python -m apexgpt train --device cpu        # force the CPU
-python -m apexgpt train --device dml        # opt into DirectML
-python -m apexgpt train --preset auto       # size the run to this machine
-```
-
-`--preset auto` reads the detected backend, its VRAM and the core count, then
-picks a preset that actually fits instead of defaulting to something that will
-page or thrash.
-
-> **About AMD GPUs.** There is no CUDA path for them, so `doctor` and `env` say
-> `cuda available: False` rather than pretending otherwise. PyTorch reaches AMD
-> hardware through a **ROCm build** (which reports itself as `cuda`; `doctor`
-> prints `rocm build:` to disambiguate) or, on Windows, through **DirectML**.
-> DirectML has no fused attention kernel, is usually *slower* than a full CPU
-> thread pool for training, and is therefore opt-in. For a CPU-only machine the
-> honest answer is the CPU.
+Every backend ApexGPT probes, and what it does when one is missing: [docs/portability.md](docs/portability.md).
 
 ---
 
@@ -346,126 +295,19 @@ apexgpt train --preset smoke
 
 ## 🪟 Windows
 
-<details open>
-<summary><b>PowerShell</b></summary>
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-python -m apexgpt setup --install
-python -m apexgpt env
-python -m apexgpt data prepare --source shakespeare
-python -m apexgpt train --dataset shakespeare
-python -m apexgpt gui
-```
-
-</details>
-
-**If `Activate.ps1` is blocked** by the execution policy, use the interpreter directly — no activation needed:
-
-```powershell
-.\.venv\Scripts\python.exe -m apexgpt env
-.\.venv\Scripts\python.exe -m apexgpt gui
-```
-
-Or unblock it once:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-```
-
-**Keep the corpus off the system drive.** By default data lands in `.\data`. If `C:` is tight, point it elsewhere:
-
-```powershell
-$env:APEXGPT_DATA_DIR = "C:\apexgpt_data"
-```
-
-<details>
-<summary><b>GPU notes for Windows</b></summary>
-
-`setup` detects `nvidia-smi` and installs the matching CUDA wheel automatically.
-On a machine with only an AMD or Intel iGPU you will correctly get `cpu`,
-because neither has a CUDA path in PyTorch. To try DirectML:
-
-```powershell
-python -m apexgpt setup --backend dml --install
-python -m apexgpt env                      # dml available: True
-python -m apexgpt train --device dml --preset smoke
-```
-
-</details>
+Dependencies and installs: [docs/platform-setup.md](docs/platform-setup.md).
 
 ---
 
 ## 🐧 Linux
 
-```bash
-sudo apt install python3-venv python3-pip     # Debian/Ubuntu
-# Fedora: sudo dnf install python3 python3-pip
-
-python3 -m venv .venv
-source .venv/bin/activate
-
-python -m apexgpt setup --install              # picks cu124 / rocm / cpu for you
-python -m apexgpt env
-python -m apexgpt data prepare --source shakespeare
-python -m apexgpt train --dataset shakespeare
-```
-
-The GUI needs Tk, which is not always installed:
-
-```bash
-sudo apt install python3-tk      # Debian/Ubuntu
-sudo dnf install python3-tkinter # Fedora
-```
-
-Run in a headless session? `train`, `generate` and `serve` all work without a display. Only `gui` needs one.
-
-<details>
-<summary><b>GPU notes for Linux</b></summary>
-
-```bash
-# NVIDIA
-python -m apexgpt setup --backend cuda --cuda 124 --install
-
-# AMD ROCm
-python -m apexgpt setup --backend rocm --rocm 6.2 --install
-
-# Intel
-python -m apexgpt setup --backend xpu --install
-```
-
-For ROCm, PyTorch needs the matching `rocm-smi` libraries present; verify with
-`rocm-smi` before trusting the detection. `python -m apexgpt env` then shows
-`rocm build:` instead of a CUDA build.
-
-</details>
+Dependencies and installs: [docs/platform-setup.md](docs/platform-setup.md).
 
 ---
 
 ## 🍎 macOS
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-
-python -m apexgpt setup --install
-# Tk is bundled, but you may need:
-xcode-select --install
-
-python -m apexgpt env
-python -m apexgpt data prepare --source shakespeare
-python -m apexgpt train --dataset shakespeare
-```
-
-On **Apple Silicon** `setup` detects `mps` and installs the default wheel, which
-includes Metal support. `doctor` will report `mps available: True`, and
-`--device auto` selects it automatically — MPS is **not** CUDA, so check the
-`mps` line rather than `cuda`. On Intel Macs it falls back to `cpu`.
-
-> The Tk GUI on macOS is the least-tested surface here; the CLI and API are the
-> dependable paths.
+Dependencies and installs: [docs/platform-setup.md](docs/platform-setup.md).
 
 ---
 
@@ -563,7 +405,7 @@ offline.
 **Tokenization** is GPT-2 byte-level BPE by default (vocab **50257**,
 round-trip verified exact), written as flat `uint16` streams and split 80/20.
 `--tokenizer char` switches to the 257-id byte-level vocabulary instead — see
-[🔤 Tokenizers](#-tokenizers):
+[🔤 Tokenizers](#%F0%9F%94%A4-tokenizers):
 
 ```
 [tokenize] 338,025 tokens (0.34M), dtype=uint16
@@ -645,7 +487,7 @@ seen 10,316 times in this corpus
 
 `--predict` ranks successors by counting pairs in the corpus, so it needs no
 model at all; a trained checkpoint does better, and
-[🔮 Predict the next word](#-predict-the-next-word-with-its-probability) prints
+[🔮 Predict the next word](#%F0%9F%94%AE-predict-the-next-word-with-its-probability) prints
 the model's own ranking. `tokens` reads text, so it never downloads the 772 MB
 Wikipedia corpus — it asks you to `data prepare --source wikipedia
 --target-mb 5` first.
@@ -653,7 +495,7 @@ Wikipedia corpus — it asks you to `data prepare --source wikipedia
 ### Models and training scripts from Hugging Face
 
 Datasets, pretrained models and Kaggle datasets all have their own command —
-[🌐 Hugging Face & Kaggle](#-hugging-face--kaggle) covers `hub check`, `hub files`,
+[🌐 Hugging Face & Kaggle](docs/hub.md#%F0%9F%8C%90-hugging-face--kaggle) covers `hub check`, `hub files`,
 `hub model`, `hub dataset` and `hub kaggle`, plus what `huggingface/transformers`
 and `huggingface/trl` are the equivalents of here.
 
@@ -777,367 +619,7 @@ making it better. So ApexGPT ships exactly one deployable — the inference API
 
 ## 📐 The mathematics behind ApexGPT
 
-Every formula below is either **used by this code** — with the file that
-implements it — or listed as **not used**, with the reason. Nothing is decorative.
-Where the distinction matters, the honest answer is more useful than a formula
-that looks impressive.
-
-### 📇 Formula index
-
-The complete list, with the notation each symbol carries. Sections further down
-derive *why* each one is here; this table is for looking one up.
-
-| # | What it computes | Formula | Notation | Implemented |
-|---|---|---|---|---|
-| 1 | Training objective | $\mathcal{L} = -\frac{1}{T}\sum_{t=1}^{T}\log\,\mathrm{softmax}(z_t)_{x_t}$ | $T$ tokens per block, $z_t$ logits at position $t$, $x_t$ the token that came next, $\theta$ the weights | `models/gpt.py:229` |
-| 2 | Output layer / sampling distribution | $p_i = \dfrac{e^{z_i}}{\sum_{j=1}^{V}e^{z_j}}$ | $z\in\mathbb{R}^{V}$ logits, $V$ vocabulary (50257 or 257) | `models/sampling.py:103` |
-| 3 | Multi-head causal attention | $\mathrm{Attn}(Q,K,V)=\mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V$ | $d_k = d/H$ per-head width (`n_head` × `head_dim` in the code), $Q=XW_Q,\ K=XW_K,\ V=XW_V$ | `models/gpt.py:63` |
-| 4 | Causality mask | $M_{ij}=0$ if $j\le i$, $-\infty$ otherwise | $i$ query position, $j$ key position; $-\infty$ kills the softmax term | `models/gpt.py:71` |
-| 5 | Every parameter's entry point | $z = Wx+b$ | $W$ weight matrix, $b$ bias vector | `nn.Linear`, `nn.Embedding` |
-| 6 | MLP nonlinearity | $\mathrm{GELU}(z)=z\,\Phi(z),\quad \Phi(z)=\frac{1}{\sqrt{2\pi}}\int_{-\infty}^{z}e^{-t^2/2}\,dt$ | $\Phi$ = standard normal CDF | `models/gpt.py:88` |
-| 7 | Feature-wise standardisation | $\mathrm{LN}(z)=\gamma\odot\frac{z-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta$ | $\mu,\sigma^2$ over the $d$ features of **one** token, $\gamma,\beta$ per-feature scale/shift, $\odot$ elementwise | `nn.LayerNorm` |
-| 8 | Residual path | $x \leftarrow x + F(\mathrm{LN}(x))$ | pre-norm: keeps the skip path an identity | `models/gpt.py:107` |
-| 9 | Weight tying | $W_{lm} = E_{token}$ | one embedding matrix, used as input lookup and output layer | `models/gpt.py:127` |
-| 10 | Inverted dropout | $\tilde{z}_i=\dfrac{z_i}{1-p}\cdot m_i,\quad m_i\sim\mathrm{Bernoulli}(1-p)$ | $p=0.1$ on embeddings, attention weights and MLP outputs; scaled by $1/(1-p)$ during training, identity at inference | `models/gpt.py:40` |
-| 11 | Initialisation | $w\sim\mathcal{N}(0,0.02^2)$; residual projections $w\sim\mathcal{N}\!\left(0,\left(\tfrac{0.02}{\sqrt{2L}}\right)^2\right)$ | $L$ layers; scales residual branches by $1/\sqrt{2L}$ | `models/gpt.py:131` |
-| 12 | Optimiser (AdamW) | $\theta\leftarrow\theta-\alpha\frac{\hat m_t/(1-\beta_1^t)}{\sqrt{\hat v_t/(1-\beta_2^t)}+\epsilon}$ | $\alpha$ learning rate, $\hat m_t,\hat v_t$ bias-corrected moments, $\beta_1=0.9$, $\beta_2=0.95$, $\epsilon=10^{-8}$ | `features/training/service.py:65` |
-| 13 | Decoupled weight decay | $\theta \leftarrow \theta - \lambda\theta$ | $\lambda=0.1$, matrices only ($p.\mathrm{dim}\ge2$) | `features/training/service.py:64` |
-| 14 | Gradient clipping | $g\leftarrow g\cdot\min\!\left(1,\frac{\tau}{\lVert g\rVert_2}\right)$ | $\tau=1.0$ | `features/training/service.py:307` |
-| 15 | Learning-rate schedule | $\eta_t=\eta_{max}\frac{t+1}{T_w}$, then $\eta_t=\eta_{min}+\frac12(\eta_{max}-\eta_{min})(1+\cos\pi p)$ | $T_w$ warmup steps $= \max(10, 0.05T)$, $p$ decay progress, $\eta_{max}=3\times10^{-4}$, $\eta_{min}=3\times10^{-5}$ | `features/training/service.py:48` |
-| 16 | Sampling temperature | $p_i=\frac{\exp(z_i/T)}{\sum_j\exp(z_j/T)}$ | $T>1$ flattens, $T<1$ sharpens, $T\le 0$ greedy `argmax` | `models/sampling.py:98` |
-| 17 | Top-$k$ filter | $z_i\leftarrow-\infty$ when $z_i<z_{(k)}$ | $z_{(k)}$ = $k$-th largest logit | `models/sampling.py:34` |
-| 18 | Nucleus (top-$p$) filter | keep the smallest $m$ with $\sum_{i\le m}p_{(i)}\ge p$ | sorted descending; the most likely token is always kept | `models/sampling.py:52` |
-| 19 | Repetition penalty | $z_i\leftarrow z_i/\lambda$ if $z_i>0$, else $\lambda z_i$ | for already-generated ids; $\lambda=1.0$ means off | `models/sampling.py:23` |
-| 20 | Predictive entropy | $H(p)=-\sum_i p_i\log p_i\in[0,\ln V]$ | natural log, so **nats**; $\ln V$ = uniform guessing | `models/sampling.py:76` |
-| 21 | Reported log-probability | $\log p_i$ on the **untruncated** softmax at the same $T$ | top-$p$ would renormalise a certain token to $\log 1 = 0$ | `models/sampling.py:154` |
-| 22 | KV cache | $K_{t}=[\,K_{<t}\,;\,k_t\,]$, attend over the concatenation | $O(T)$ per generated token instead of $O(T^2)$ | `models/gpt.py:53` |
-| 23 | Steps per epoch | $\left\lfloor \dfrac{N_{train}}{B\cdot T_{blk}}\right\rfloor$ | $B$ batch size, $T_{blk}$ block size | `features/training/service.py:72` |
-| 24 | Perplexity | $\mathrm{PPL}=e^{\mathcal{L}}$, comparable as $\mathcal{L}$ per character | only comparable within one tokenizer | reported as `val loss` |
-| 25 | Forward-pass cost | $\mathrm{FLOPs}\approx 6N+12LHd^2T$ | $N$ parameters, $L$ layers, $H$ heads, $d$ hidden, $T$ tokens | `models/builder.py:26` |
-| 26 | Machine statistics | $\mu=\frac1n\sum x_i$, $\sigma^2=\frac1n\sum(x_i-\mu)^2$, $\rho=\frac{\mathrm{Cov}}{\sigma_X\sigma_Y}$ | scan inputs: CPU, RAM, cores, per-process cost | `core/system.py` |
-| 27 | CPU utilisation | $100\left(1-\frac{\Delta\,\mathrm{idle}}{\Delta\,\mathrm{idle}+\Delta\,\mathrm{kernel}+\Delta\,\mathrm{user}}\right)$ | counters are cumulative since boot, so **differences** of two samples | `core/system.py:164` (psutil), `:204` (Win32 `GetSystemTimes`) |
-Four conventions that the table alone would hide:
-
-- **Padding is excluded, not predicted.** Targets of `-1` are dropped from the
-  mean (`ignore_index=-1`), so a padded position contributes no loss term.
-- **No label smoothing.** The target is exactly one-hot; smoothing
-  ($\mathcal{L} = (1-\varepsilon)\mathcal{L}_{x_t} + \frac{\varepsilon}{V}\sum_i \mathcal{L}_i$)
-  is deliberately not applied, because the point of this project is to report
-  the model's real uncertainty.
-- **Everything is in nats.** Loss, entropy and log-probabilities all use the
-  natural log, so $\ln V$ is the no-information baseline. Divide by
-  $\ln 2 = 0.693$ for bits.
-- **Log-probability is measured before truncation.** A token drawn after top-$p$
-  collapse still reports its probability under the untouched softmax at the same
-  temperature, which is the model's own uncertainty rather than an artefact of
-  the filter.
-
-The classification formulas that are deliberately *absent* — accuracy, precision,
-recall, $F_1$, confusion matrix — are listed with their reasons in
-[Deliberately not implemented](#-deliberately-not-implemented).
-
-**Notation key.** One row per symbol, so no formula above needs a detour to
-read:
-
-| Symbol | Means | Symbol | Means |
-|---|---|---|---|
-| $T$ | tokens in one training block, or in the sampled window | $\theta$ | the full parameter vector of the network |
-| $t$ | index of a token position, $1 \dots T$ | $\epsilon$ | numerical floor ($10^{-8}$ in AdamW, $10^{-5}$ in LayerNorm) |
-| $x_t$ | the **target** token at position $t$ (the one that came next) | $\alpha$, $\eta_{max}$ | learning rate, its peak value |
-| $z$, $z_t$ | logits, before softmax | $\eta_{min}$ | learning-rate floor after decay |
-| $p_i$ | probability of token id $i$ | $\eta_t$, $T_w$ | learning rate at step $t$, warmup length |
-| $V$ | vocabulary size: 50257 (GPT-2 BPE) or 257 (byte-level) | $\tau$ | gradient-clipping threshold (1.0) |
-| $d$ | hidden width (`n_embd`) | $\lambda$ | weight decay (0.1) or repetition penalty ($\ge 1$) |
-| $L$ | number of transformer blocks | $g_t$, $\hat m_t$, $\hat v_t$ | gradient, its first and second moment |
-| $H$ | number of attention heads (`n_head` in the code) | $\beta_1$, $\beta_2$ | moment decay rates (0.9, 0.95) |
-| $d_k$ | per-head width, $d/H$ | $p$ | nucleus mass (top-$p$) or schedule progress |
-| $Q,K,V$ | query, key, value matrices | $k$ | number of tokens kept by top-$k$ |
-| $W, b$ | weight matrix, bias vector | $B$, $T_{blk}$ | micro-batch size, block (context) length |
-| $\gamma$, $\beta$ | LayerNorm scale and shift (not Adam's $\beta$) | $N$, $N_{train}$ | parameter count, training tokens |
-| $\odot$ | elementwise (Hadamard) product | $\Phi$ | standard normal CDF |
-| $\mu$, $\sigma^2$, $\sigma$ | mean, variance, standard deviation | $\rho$ | Pearson correlation |
-| $m, v$ | Adam's uncorrected moments | $\lVert g\rVert_2$ | Euclidean norm of the gradient |
-| $F$ | attention or MLP sublayer | $\ln$, $e$ | natural logarithm, $e^x$ |
-
-### The one loss function this project trains
-
-Language modelling is next-token prediction. For a token sequence
-$x_1, \dots, x_T$ the model predicts each token from the ones before it, and the
-training objective is the **cross-entropy** between its predicted distribution and
-the one-hot distribution of the token that actually came next:
-
-$$
-\mathcal{L} = -\frac{1}{T}\sum_{t=1}^{T}\log p_\theta(x_t \mid x_{<t}),
-\qquad
-p_\theta(x_t \mid x_{<t}) = \mathrm{softmax}(z_t)_i \;\text{ at } i = x_t
-$$
-
-Cross-entropy is the KL divergence between the model's distribution and the
-target distribution, with the target's own entropy $H(y)$ dropped because it is a
-constant that cannot be optimised:
-
-$$
-D_{\mathrm{KL}}(P\|Q) = \sum_i P(x_i)\log\frac{P(x_i)}{Q(x_i)},
-\qquad
-\underbrace{H(P,Q)}_{\text{cross-entropy}} = \underbrace{D_{\mathrm{KL}}(P\|Q)}_{\text{optimised}} + \underbrace{H(P)}_{\text{constant}}
-$$
-
-This is the entire objective. Everything else — depth, attention, sampling — is a
-way of estimating or using $p_\theta$. It is implemented in
-`models/gpt.py` (the `targets` branch of `GPT.forward`) and reported as
-`val loss`.
-
-**How to read the numbers in this README.** The loss is in **nats**, i.e. the
-average of $-\log p$. For a fresh model that is exactly $\ln V$:
-
-| Vocabulary | Fresh model | Perfect model |
-|---|---|---|
-| GPT-2 BPE, $V = 50257$ | $\ln 50257 = 10.82$ nats/token | 0 |
-| byte-level, $V = 257$ | $\ln 257 = 5.55$ nats/char | 0 |
-
-So a byte-level model can reach a lower *number* than a BPE model and still be
-worse at text. The comparable quantity is nats **per character**
-(`nats/token ÷ chars-per-token`), which is why the tokenizer comparison in
-[🔤 Tokenizers](#-tokenizers) is decided on 1.702 vs 2.461 nats/char rather than
-on 5.6159 vs 2.4614.
-
-### Attention
-
-Scaled dot-product attention, one head:
-
-$$
-\mathrm{Attention}(Q,K,V) = \mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V,
-\qquad Q = XW_Q,\; K = XW_K,\; V = XW_V
-$$
-
-The $1/\sqrt{d_k}$ factor is what keeps the softmax out of its saturating region:
-if the entries of $q\cdot k$ have variance $\propto d_k$, the logits' variance
-grows with $d_k$ too, `softmax` becomes a hard argmax, and the gradient vanishes.
-Dividing by $\sqrt{d_k}$ restores unit variance. Implemented in
-`models/gpt.py::CausalSelfAttention` via
-`torch.nn.functional.scaled_dot_product_attention` with a causal mask, so the
-mask, the scaling and the softmax are the fused kernel's, not a re-implementation.
-
-### The neuron and its activations
-
-Every parameter in the network enters through an affine map, and the network is a
-stack of these with a nonlinearity between them — without the nonlinearity,
-stacking $L$ layers is algebraically the same as one layer:
-
-$$
-z = Wx + b,
-\qquad
-\text{ReLU}(z) = \max(0, z),
-\qquad
-\text{GELU}(z) = z\,\Phi(z),
-\qquad
-\Phi(z) = \frac{1}{\sqrt{2\pi}}\int_{-\infty}^{z} e^{-t^2/2}\,dt
-$$
-
-ApexGPT's MLP is `GELU → Linear(4d) → Linear(d)` (`models/gpt.py::MLP`), and
-`GELU` is used because it is smooth, which matters when the network is deep. The
-positional and token embeddings are the exception: those are pure affine maps,
-with no activation in between, because a lookup has nothing to be nonlinear.
-
-### Normalisation
-
-LayerNorm standardises each token's feature vector across the hidden dimension,
-then rescales it so the network can still express whatever magnitude it needs:
-
-$$
-\mu = \frac{1}{d}\sum_{i=1}^{d} z_i,
-\qquad
-\sigma^2 = \frac{1}{d}\sum_{i=1}^{d}(z_i - \mu)^2,
-\qquad
-\mathrm{LayerNorm}(z) = \gamma \odot \frac{z-\mu}{\sqrt{\sigma^2+\epsilon}} + \beta
-$$
-
-The statistics are taken over features, never over the batch, which is why a
-LayerNorm network is independent of batch size. The blocks here are
-**pre-LayerNorm** ($x + \mathrm{Attn}(\mathrm{LN}(x))$), which keeps the residual
-path an identity and is what makes a 12-layer stack trainable at this scale.
-Implemented in `models/gpt.py` as `LayerNorm`.
-
-### Optimisation
-
-Gradient descent, and the two refinements this trainer uses:
-
-$$
-\theta_{t+1} = \theta_t - \alpha\,\nabla_\theta \mathcal{L}(\theta_t)
-$$
-
-$$
-\underbrace{\hat{m}_t = \beta_1 \hat{m}_{t-1} + (1-\beta_1)\,g_t}_{\text{momentum}},
-\qquad
-\underbrace{\hat{v}_t = \beta_2 \hat{v}_{t-1} + (1-\beta_2)\,g_t^2}_{\text{second moment}}
-$$
-
-$$
-\theta_{t+1} = \theta_t - \alpha\left(\frac{\hat{m}_t}{1-\beta_1^t}\right)\Bigg/\left(\sqrt{\frac{\hat{v}_t}{1-\beta_2^t}} + \epsilon\right)
-$$
-
-That is AdamW's update, where $g_t = \nabla_\theta\mathcal{L}$ and this project
-uses $\beta_1 = 0.9$, $\beta_2 = 0.95$ (`core/config.py`), $\epsilon = 10^{-8}$
-— note that $\beta_2$, not the canonical $0.999$: this trainer runs short,
-CPU-sized runs where the extra memory of a slower-decaying second moment buys
-nothing. Dividing by $\sqrt{\hat v_t}$ makes the step
-size roughly $\alpha$ regardless of gradient magnitude, and the bias correction
-$m/(1-\beta^t)$ fixes the fact that $\hat m_t$ and $\hat v_t$ start at zero and
-would otherwise bias the first steps towards zero. **Decoupled** weight decay
-(`AdamW`) applies the penalty to the weights directly instead of folding it into
-the gradient, which decouples it from the adaptive rescaling; it is applied to
-matrices only ($p.\mathrm{dim} \ge 2$), never to biases or LayerNorm gains, with
-$\lambda = 0.1$.
-
-Three more pieces of the training loop:
-
-| | Formula | Where |
-|---|---|---|
-| gradient clipping | $\min(1,\ \tau/\lVert g\rVert_2)\cdot g$ | bounds a single bad batch; $\tau = 1.0$ |
-| linear warmup | $\eta_t = \eta_{max}\dfrac{t+1}{T_w}$ for $t < T_w$ | $T_w = \max(10, 0.05\,T)$ — 5% of the run |
-| cosine decay | $\eta_t = \eta_{min} + \tfrac12(\eta_{max}-\eta_{min})(1+\cos(\pi p))$, $p = (t-T_w)/(T-T_w)$ | the `lr` column in every loss table; $\eta_{max}=3\times10^{-4}$, $\eta_{min}=3\times10^{-5}$ |
-| backpropagation | $\dfrac{\partial \mathcal{L}}{\partial w} = \dfrac{\partial \mathcal{L}}{\partial a}\cdot\dfrac{\partial a}{\partial w}$, applied by the chain rule backwards through every op | `loss.backward()` |
-
-### Sampling, and why temperature is a division
-
-At generation time the logits are turned into a distribution and sampled from,
-after three optional filters — `models/sampling.py`:
-
-$$
-p_i = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}
-$$
-
-Raising the temperature $T > 1$ **flattens** the distribution (logits are divided,
-so differences shrink); $T < 1$ sharpens it; $T = 0$ is greedy decoding and takes
-`argmax`. `top_k` keeps the $k$ largest logits, `top_p` keeps the smallest set
-whose cumulative probability reaches $p$ (nucleus sampling), and
-`repetition_penalty` divides positive logits / multiplies negative ones for tokens
-already generated. `--predict` bypasses all of it and shows the untouched
-distribution from which sampling would have drawn.
-
-**Entropy** of that distribution, in nats, is the diagnostic used by `--predict`:
-
-$$
-H(p) = -\sum_i p_i \log p_i,
-\qquad 0 \le H(p) \le \ln V
-$$
-
-$H = \ln V$ is uniform guessing; $H = 0$ is a single forced token. The measured
-6.632 nats against $\ln 50257 = 10.825$ says the model is far from uniform but
-far from confident.
-
-### Evaluation metrics, and which ones apply
-
-Perplexity is the exponentiated loss, and it is the one metric worth quoting for
-a language model:
-
-$$
-\mathrm{PPL} = e^{\mathcal{L}}
-\quad\Rightarrow\quad
-\text{BPE val } e^{5.6159} = 275,\qquad
-\text{byte-level val } e^{2.4614} = 11.7
-$$
-
-Those are **not comparable** across tokenizers — 275 sounds 20× worse than 11.7
-while being the better model, because each covers a different amount of text.
-Per character, the BPE model's perplexity is $e^{1.702} = 5.48$ against the
-byte-level model's $e^{2.4614} = 11.7$.
-
-Classification metrics are **not** what a language model is evaluated with — this
-project has no labels and no decision threshold, so there is no confusion matrix
-to build one from. For completeness, and because the question always comes up:
-
-$$
-\mathrm{Accuracy} = \frac{TP+TN}{TP+TN+FP+FN},
-\qquad
-\mathrm{Precision} = \frac{TP}{TP+FP},
-\qquad
-\mathrm{Recall} = \frac{TP}{TP+FN}
-$$
-
-$$
-F_1 = \frac{2\cdot\mathrm{Precision}\cdot\mathrm{Recall}}{\mathrm{Precision}+\mathrm{Recall}}
-$$
-
-$F_1$ is their harmonic mean, so it collapses when either one does — which is the
-property you want when both matter. The confusion matrix itself is:
-
-$$
-C = \begin{bmatrix} TN & FP \\ FN & TP \end{bmatrix}
-$$
-
-### Descriptive statistics behind the environment scan
-
-The scan that sizes a run to the machine (`core/system.py`, `core/environment.py`)
-is built from these:
-
-$$
-\mu = \frac{1}{n}\sum_{i=1}^{n} x_i,
-\qquad
-\sigma^2 = \frac{1}{n}\sum_{i=1}^{n}(x_i-\mu)^2,
-\qquad
-\sigma = \sqrt{\sigma^2}
-$$
-
-$$
-\mathrm{Cov}(X,Y) = \frac{1}{n}\sum_{i=1}^{n}(x_i-\mu_X)(y_i-\mu_Y),
-\qquad
-\rho = \frac{\mathrm{Cov}(X,Y)}{\sigma_X\,\sigma_Y} \in [-1, 1]
-$$
-
-CPU utilisation is a *ratio of differences*, because the counters are cumulative
-since boot — comparing two samples, not two absolutes:
-
-$$
-\text{util} = 100\left(1 - \frac{\Delta\,\text{idle}}{\Delta\,\text{idle} + \Delta\,\text{kernel} + \Delta\,\text{user}}\right)
-$$
-
-That is why `_split_cpu_line` exists, and why the scan reports the load average
-$\left(\frac{1}{5m}\sum_{i} D_i,\ \frac{1}{15m}\sum_{i} D_i,\ \frac{1}{60m}\sum_{i} D_i\right)$
-where $D_i$ is the number of runnable processes — the same quantity the live
-scan compares against `DEFAULT_MAX_CPU_PERCENT = 85.0`.
-
-### Deliberately not implemented
-
-Naming these is more useful than quietly implying support:
-
-| Method | Formula | Why not here |
-|---|---|---|
-| Linear regression | $y = \beta_0 + \beta_1 x$ | nothing here is a continuous target |
-| Cost function (MSE) | $J(\theta)=\frac{1}{n}\sum_i (y_i-\hat y_i)^2$ | regression loss; language modelling uses cross-entropy |
-| Logistic regression | $p = \sigma(z) = \frac{1}{1+e^{-z}}$, $\ \mathcal{L}=-\frac1n\sum_i\big[y_i\log p_i + (1-y_i)\log(1-p_i)\big]$ | binary classification — a language model is a softmax over 50,257 classes, which *contains* this as the $K=2$ case |
-| Softmax (multiclass) | $p_i = \dfrac{e^{z_i}}{\sum_j e^{z_j}}$ | **used** — `models/sampling.py`, and it *is* the model's output layer |
-| Naive Bayes | $P(y\mid x) = \dfrac{P(x\mid y)\,P(y)}{P(x)}$ | conditional independence is false for language |
-| K-Means | $\arg\min_c \lVert x_i - \mu_{c_i}\rVert_2^2$ | no clustering step; the tokenizer vocabulary is not learned by clustering |
-| SVM | $f(x) = w^\top x + b$, maximise margin subject to $y_i f(x_i) \ge 1$ | no support vectors, no kernel trick |
-| L1 / L2 regularisation | $\lambda\sum_i\lvert\beta_i\rvert$ / $\lambda\sum_i \beta_i^2$ | **L2 via AdamW, weight decay only** — no L1, no sparse weights |
-| Bias–variance | $\mathbb{E}[(y-\hat f(x))^2] = \mathrm{Bias}^2[\hat f] + \mathrm{Var}[\hat f] + \sigma^2$ | the decomposition is descriptive, not something a run reports |
-| Gradient boosting (XGBoost, LightGBM) | $\hat y = \sum_{k} f_k(x)$, $f_k$ fits the residual gradient | trees do not tokenise; a 123.8M-parameter transformer is the model here. `sklearn` is not a dependency |
-| Vector database | embeddings + ANN index (HNSW, IVF) | there is no retrieval step: the context is a fixed-size window of the corpus, not a search over a store |
-| Mutual information | $I(X;Y) = H(X) - H(Y\mid X) = H(X)+H(Y)-H(X,Y)$ | meaningful, but nothing in this repo measures it; `--predict`'s entropy is the one place it would come from |
-| KL divergence | $D_{\mathrm{KL}}(P\|Q)=\sum_i P_i\log\frac{P_i}{Q_i}$ | **used** — it *is* the training loss, cross-entropy minus the target entropy (see above) |
-
-Fine-tuning, reinforcement learning from human feedback, LoRA and quantisation
-are equally absent, and saying so is more useful than a stub: a 30M-parameter
-model trained on one corpus is not a base model anybody can fine-tune
-meaningfully. `--resume` continues *this* trainer's own checkpoints.
-
-### Cost of one forward pass
-
-The `full` preset's estimated FLOPs per token, and the reason the presets differ
-so much in wall-clock:
-
-$$
-\mathrm{FLOPs} \approx 6N + 12\,LHd^2T
-\qquad
-(6N:\ \text{matmul},\;\; 12LHd^2T:\ \text{attention scores and values})
-$$
-
-with $N$ parameters, $L$ layers, $H$ heads, $d$ hidden, $T$ tokens. The second
-term is quadratic in sequence length, which is exactly what the KV cache exists
-to avoid: generating token $T+1$ with a cache costs one forward pass over the new
-token only, not over the whole window. `models/builder.py::estimate_flops`
-implements it.
+Every formula the code implements, with the notation key: [docs/mathematics.md](docs/mathematics.md).
 
 ---
 
@@ -1219,37 +701,7 @@ its spec in `corpus.json`, the checkpoint records the tokenizer and its vocab
 size in its metadata, and `generate` decodes with whatever the checkpoint was
 trained on — loading a `char` checkpoint never silently runs it through GPT-2
 BPE.
-
-### Measured: GPT-2 BPE vs. byte-level, `cpu-tiny`, 400 steps
-
-| | GPT-2 BPE (`gpt2`) | Byte-level (`char`) |
-| --- | --- | --- |
-| vocabulary | 50,257 | **257** |
-| tokens for the corpus | 338,025 | **1,115,394** |
-| characters per token | 3.30 | 1.00 |
-| characters actually observed | — | 65 |
-| parameters (`cpu-tiny`) | 30.0M | **10.8M** |
-| speed on 8 CPU threads | ~230 tok/s | **~500 tok/s** |
-| characters seen in 400 steps | 1.01M | 0.31M |
-| validation loss | 5.6159 nats/token | 2.4614 nats/char |
-| **validation loss per character** | **1.702 nats/char** | 2.4614 nats/char |
-| train / validation split | 268,364 / 69,661 | 892,315 / 223,079 |
-
-The two losses are only comparable once they are divided by characters, which is
-why the table ends in nats/char. BPE stays the default: at equal steps each of
-its sequences covers 3.3× more text, and that outweighs its size. `char` is
-worth choosing when you want the smaller model and the faster iteration — 3×
-fewer parameters, because the embedding drops from 19.3M to 0.10M, and ~2×
-throughput — and its output is visibly rougher at the same step count:
-
-```text
-ROMEO:
-Wit lllll he, wif me he thome
-Fou ase dseis y thers omyongo illll dirold nd are he hey it te mere s
-```
-
----
-
+> Measured runs moved to [docs/measurements.md](docs/measurements.md).
 ## 🎓 Training
 
 ```bash
@@ -1261,36 +713,8 @@ python -m apexgpt train --dataset shakespeare --resume models/runs/gpt-shakespea
 Forward → cross-entropy next-token loss → backward → gradient clipping → AdamW
 step, with warmup and cosine decay, periodic validation, checkpointing, tqdm
 progress, and matplotlib loss curves.
-
-### Completed run — `cpu-tiny` on tiny Shakespeare, 400 steps, 29 min
-
-```
-[mem]      amp=False grad_checkpointing=False   (CPU: bf16 is emulated ...)
- step  train   val     lr
-  100 6.1314 6.1929 2.72e-04
-  200 5.3189 5.8664 1.77e-04
-  300 5.2917 5.7019 7.44e-05
-  400 5.4510 5.6159 3.00e-05
-best val: 5.6159 at step 400
-```
-
-Validation loss fell from **10.82** (ln 50257 — random guessing) to **5.62** on a
-270k-token corpus, in 29 minutes on a CPU with no GPU, at ~230 tok/s.
-
-### Completed run — `cpu-tiny` on Wikipedia, 600 steps, 44 min
-
-```
- step  train   val     lr
-   25 9.3828 9.2700 2.50e-04
-  125 7.6041 7.6740 2.82e-04
-  225 7.3825 7.2816 2.30e-04
-  325 7.3503 7.2753 1.58e-04
-  425 7.3957 7.1531 8.87e-05
-  525 6.9428 7.0375 4.17e-05
-  600 7.0739 7.2499 3.00e-05
-best val: 7.0375 at step 525
-```
-
+> Measured runs moved to [docs/measurements.md](docs/measurements.md).
+> Measured runs moved to [docs/measurements.md](docs/measurements.md).
 ### ⚠️ On "2–3 epochs"
 
 The Wikipedia corpus is **242M training tokens**. One epoch at 2048 tokens per
@@ -1383,95 +807,7 @@ rows, entropy = engine.predict_next_with_entropy("To be, or not")
 
 ## 🌐 Hugging Face & Kaggle
 
-```bash
-python -m apexgpt hub check                              # what this machine can do
-python -m apexgpt hub files gpt2                         # what is in a repo
-python -m apexgpt hub dataset Salesforce/wikitext        # download dataset files
-python -m apexgpt hub model gpt2 --predict "Once upon a time"
-python -m apexgpt hub kaggle inria/tiny-imagenet         # download a Kaggle dataset
-```
-
-### 🎯 Run a pretrained model and ask it the same question
-
-`hub model <repo_id> --predict "<prompt>"` downloads the repo, loads it with
-`transformers`, and prints the next-token distribution — the identical output
-format `--predict` gives for a model trained here, so the two are directly
-comparable:
-
-```bash
-python -m apexgpt hub model gpt2 \
-    --predict "Once upon a time" --top-k 8 --max-new-tokens 200 --device auto
-```
-
-Two details worth knowing. First, `hub model` fetches **only** the config, the
-tokenizer and the weights (`*.json`, `*.txt`, `*.safetensors`, `*.bin`); the
-`gpt2` repo also ships the same model as ONNX, TensorFlow, Flax and Rust, which
-is 3.5 GB of files PyTorch never reads. `--allow` overrides the list. Second,
-`transformers` is imported lazily inside the call, so a machine that only trains
-ApexGPT never loads it.
-
-> If a download fails with a **404 on `xet-read-token`**, the xet storage
-> backend cannot authenticate anonymously on that network. Retry with
-> `HF_HUB_DISABLE_XET=1` set, or log in with `HF_TOKEN`. Both are surfaced by
-> `hub check`.
-
-### 📥 Datasets
-
-```bash
-python -m apexgpt data prepare --source hf:roneneldan/TinyStories   # streamed, cut at --target-mb
-python -m apexgpt data prepare --source kaggle:user/dataset-slug    # Kaggle credentials required
-python -m apexgpt hub dataset Salesforce/wikitext --allow '*.parquet'
-python -m apexgpt hub kaggle user/dataset-slug
-```
-
-`hub dataset` and `hub kaggle` put the raw files on disk under `data/hub/`
-without converting them, for when the parquet or JSONL layout matters. `data
-prepare` is the other path: it ends with one plain UTF-8 text file, which is what
-the tokenizer and the `uint16` binaries are built from. Both land in the same
-`data/raw/<key>/` convention afterwards.
-
-**Kaggle credentials are not a pip package.** Create an API token at
-*Kaggle → Settings → API* and save it as `~/.kaggle/kaggle.json`
-(`%USERPROFILE%\.kaggle\kaggle.json` on Windows), then:
-
-```bash
-python -m apexgpt setup --hub --install    # kagglehub, or use the kaggle CLI
-python -m apexgpt hub check                # confirms client + credentials
-```
-
-`hub check` prints the whole picture in one screen — Hub client, `transformers`,
-`datasets`, Kaggle client, Kaggle credentials, token present, and the two
-directories downloads land in:
-
-```text
-  models   : .../data/hub/models
-  datasets : .../data/hub/datasets
-
-  [ok] download Hugging Face datasets             public repos need no token; private ones need HF_TOKEN
-  [ok] stream Hugging Face datasets into a corpus python -m apexgpt data prepare --source hf:<repo_id>
-  [ok] download and run a Hugging Face model      pip install -r requirements-hub.txt
-  [--] Hub authentication                         huggingface-cli login, or set HF_TOKEN
-  [--] download Kaggle datasets                   pip install kagglehub (or the kaggle CLI) and put kaggle.json in ~/.kaggle/
-```
-
-### 🧑‍🏫 Reference training scripts
-
-ApexGPT trains its own GPT rather than loading one, so the Hub's training scripts
-are the equivalent of `features/training/service.py` for pretrained models —
-read them, do not depend on them:
-
-| Upstream | Script | Equivalent here |
-|----------|--------|-----------------|
-| `huggingface/transformers` | `examples/pytorch/language-modeling/run_clm.py` | `features/training/service.py` — corpus → batches → AdamW → checkpoints |
-| `huggingface/trl` | `SFTTrainer` | supervised fine-tuning of a pretrained checkpoint; the same loop with a different data source |
-| `huggingface/tokenizers` | `Tokenizer` training | `features/data/tokenizers.py` for the byte-level vocabulary |
-
-Fine-tuning a released checkpoint is `--resume`, which restores the model, the
-optimizer and the step count rather than starting over:
-
-```bash
-python -m apexgpt train --dataset shakespeare --resume <checkpoint.pt> --max-iters 800
-```
+Pretrained models, hub datasets and the reference training scripts: [docs/hub.md](docs/hub.md).
 
 ---
 
@@ -1489,7 +825,7 @@ the ranked candidates into the output pane before generation starts.
 
 Under the prompt box sits the **token bar**: the value of every id the prompt
 turns into, and what the model expects to put after it. It is the same table
-[`data tokens`](#-every-token-with-its-id) prints and the same ranking
+[`data tokens`](#%F0%9F%94%A2-every-token-with-its-id) prints and the same ranking
 `generate --predict` prints, refreshed as you type (debounced, on a worker
 thread, with a stale result dropped rather than shown):
 
@@ -1529,168 +865,13 @@ ids and says so, rather than inventing a frequency.
 
 ## 🌐 HTTP API
 
-Optional, and the one part of ApexGPT that runs as its own process.
-
-### The one-line command
-
-```bash
-python -m apexgpt serve
-```
-
-That is the whole thing: it binds **http://127.0.0.1:8000** (the defaults) and
-finds the most recent real checkpoint on its own, loading the tokenizer that
-checkpoint recorded. Written out in full — the same thing, with the defaults
-spelled out:
-
-```bash
-python -m apexgpt serve --host 127.0.0.1 --port 8000
-```
-
-`--host`, `--port`, `--checkpoint` and `--device` only override what it would
-have picked. Bind `0.0.0.0` instead of `127.0.0.1` to let other machines on your
-network reach it. Check it is alive with:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-```json
-{"status":"ok","model":{"checkpoint":"models/runs/gpt-shakespeare-char/checkpoint.pt",
- "parameters_m":10.8,"block_size":192,"vocab_size":257,"tokenizer":"char",
- "step":400,"val_loss":2.461369639635086,"device":"cpu"}}
-```
-
-Interactive API docs, including every field of every request, are at
-**http://127.0.0.1:8000/docs**.
-
-### Everything else
-
-```bash
-pip install -r requirements-api.txt
-python -m apexgpt serve --host 0.0.0.0 --port 8000
-```
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/` | GET | landing page: the endpoints below, and which model is loaded |
-| `/health` | GET | liveness + model metadata |
-| `/generate` | POST | one-shot generation, JSON in / JSON out, with logprobs |
-| `/predict` | POST | the ranked next-token distribution, nothing sampled |
-| `/stream` | GET | server-sent events, one `data:` line per token |
-| `/v1/completions` | POST | OpenAI-compatible alias for third-party clients |
-| `/v1/models` | GET | model discovery, which OpenAI clients probe first |
-| `/docs` | GET | interactive OpenAPI docs |
-
-> `/predict` takes the same request body as generation, so the number of
-> candidates is **`top_k`** — not `k`. An unrecognised field is ignored, so
-> `{"prompt": "…", "k": 5}` quietly returns all 50 rows instead of 5.
-
-```bash
-curl http://localhost:8000/health
-
-curl -X POST http://localhost:8000/generate \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"The history of the city is","max_new_tokens":40,"temperature":0.8}'
-
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"The history of the city is","top_k":5}'
-
-curl -N "http://localhost:8000/stream?prompt=hello&max_new_tokens=20"
-```
-
-```
-data: {"type": "meta", "parameters_m": 30.0, ...}
-data: {"type": "token", "text": " List", "token_id": 2534, "logprob": -1.83, "stop_reason": null}
-data: {"type": "token", "text": " Faction", "token_id": 18965, "logprob": -2.41, "stop_reason": null}
-data: {"type": "done"}
-```
-
-Every event carries the token's own log-probability — the number the training
-loop minimises — so a client can score the model instead of only reading it:
-
-```bash
-curl -X POST http://localhost:8000/v1/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"apexgpt","prompt":"hello","max_tokens":20}'
-```
-
-```json
-{
-  "id": "cmpl-1759000000",
-  "object": "text_completion",
-  "choices": [{
-    "index": 0,
-    "text": "...",
-    "logprobs": {"tokens": [" List", " Faction"], "token_logprobs": [-1.83, -2.41]},
-    "finish_reason": "length"
-  }],
-  "usage": {"prompt_tokens": 2, "completion_tokens": 20, "total_tokens": 22},
-  "apexgpt": {"elapsed_s": 0.31, "device": "cuda:0", "...": "..."}
-}
-```
-
-`logprobs` used to be hardcoded to `null` and `finish_reason` to `"length"`; both
-are now measured — `finish_reason` is `eos` when the model emitted the end token
-and `length` when it ran out of budget.
-
-> `stream: true` is refused there with a `400` pointing at `/stream`: OpenAI
-> streams token objects, ApexGPT streams bare text, and faking that shape would
-> break more clients than it would serve.
-
-This is what makes the project usable from a phone or another program without
-linking against Python.
-
-**Security.** No authentication, no rate limiting, no TLS. Bind to `127.0.0.1`
-unless you mean otherwise.
+The service in one command, then the full endpoint reference: [docs/http-api.md](docs/http-api.md).
 
 ---
 
 ## 🤖 Android
 
-Being straight about this: **PyTorch training on Android is not a realistic target**, and this project does not ship an Android app. What is genuinely possible:
-
-**1. Termux — run the CLI on the phone** (slow but real)
-
-```bash
-pkg install python clang libjpeg-turbo
-python -m apexgpt setup --install          # Termux has no GPU, so this picks cpu
-python -m apexgpt env
-python -m apexgpt train --dataset shakespeare --preset smoke
-```
-
-Expect CPU-only training on a phone to be roughly **20-50x slower** than a laptop — and phone SoCs are usually ARM with far less memory bandwidth. Practical for the CLI, the test suite and inference; not for real training runs. tiny Shakespeare is the corpus to use here: 1.1 MB instead of 1.3 GB.
-
-**2. A client for the HTTP API** — the supported route
-
-Run `serve` on your PC, bind it to the LAN, and call it from any phone browser or app:
-
-```bash
-python -m apexgpt serve --host 0.0.0.0 --port 8000
-```
-
-```bash
-# from the phone's browser or any HTTP client
-curl "http://192.168.1.50:8000/stream?prompt=hello&max_new_tokens=20"
-```
-
-Because `/v1/completions` speaks the **OpenAI completion shape**, existing
-Android/Flutter clients work without modification — point them at your machine
-and set the model name to anything:
-
-```bash
-curl -X POST http://192.168.1.50:8000/v1/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"apexgpt","prompt":"hello","max_tokens":20}'
-```
-
-> **Do not expose this to the internet as-is.** There is no authentication,
-> rate limit or TLS. Bind it to `127.0.0.1` or a trusted LAN, and put a reverse
-> proxy in front of it if it needs to leave your network.
-
-**3. On-device inference** would need an ONNX/TFLite export plus a Kotlin or
-Flutter client. That is a real piece of work with a genuine accuracy cost from
-conversion, and it is **not implemented here**.
+Driving the API from a phone: [docs/android.md](docs/android.md).
 
 ---
 
@@ -1766,6 +947,7 @@ ApexGPT/
 │   ├── api/server.py           # optional FastAPI service
 │   └── tools/                  # setup, env, doctor, lab, notebook_sources
 ├── notebooks/                  # generated .ipynb: environment, train, inference
+├── docs/                       # reference material split out of this README
 ├── tests/
 ├── models/runs/<name>/         # checkpoint.pt, history.json, loss_curves.png
 ├── data/raw/<corpus>/          # cached corpus text
@@ -1773,7 +955,8 @@ ApexGPT/
 ├── data/hub/                   # Hugging Face / Kaggle downloads
 ├── apexgpt.settings.json       # persisted overrides (written by --save-settings)
 ├── pyproject.toml              # packaging: pip install -e . -> the apexgpt command
-├── .github/workflows/tests.yml # CI: pytest on Linux/Windows, wheel build
+├── .github/workflows/tests.yml   # CI: pytest on Linux/Windows, wheel build
+├── .github/workflows/release.yml # a v* tag becomes a GitHub Release
 ├── requirements.txt
 ├── requirements-api.txt
 ├── requirements-hub.txt
@@ -1785,40 +968,7 @@ ApexGPT/
 
 ## 🐛 Bugs found and fixed
 
-Notable defects caught during the audit and regression-tested:
-
-| Bug | Impact |
-|-----|--------|
-| KV cache used `is_causal=False` on cached multi-token steps | queries attended to **future tokens** |
-| `set_gradient_checkpointing()` folded the flag with `.training` | silently no-op'd unless called after `.train()` |
-| `--epochs` accepted and ignored | users got a different run than they asked for |
-| Resume discarded history and best-val | loss curves silently restarted |
-| `np.memmap` reopened per batch | re-read a 461 MB file every step |
-| `np.unique` on 242M tokens | sorted the whole corpus for a log line |
-| `transformers` 5.18 `save_pretrained` wrote an empty tokenizer | silently produced a **zero-token corpus** |
-| `--force` deleted the 1.2 GB corpus | 20-minute rebuild, no warning |
-| `_split_binary` returned total tokens instead of train count | validation split came out empty |
-| `/stream` handler contained a `yield` | FastAPI consumed the generator and returned an **empty body** |
-| Pydantic models defined inside a factory | unresolved forward refs, schema generation crashed |
-| Test-artifact checkpoints shadowed real runs | `generate` silently loaded the wrong model |
-| GUI read a Tk variable from a worker thread | `RuntimeError: main thread is not in main loop` |
-| `python -m apexgpt data prepare` — documented in the README but not implemented | every corpus command in the docs errored out |
-| ROCm index built as `cu124rocm`, XPU index missing the `download.` host | both wheel installs 404'd |
-| Assigning `DataConfig.dataset` left `binary_dir` alone | trained on the **previous** corpus's tokens |
-| `DataConfig` `raw_dir`/`binary_dir` could not be overridden per corpus | every corpus shared one directory |
-| Char-corpus reports decoded with GPT-2 BPE | `UnicodeEncodeError: 'charmap' codec can't encode '\ufffd'` on Windows consoles |
-| `ByteTokenizer.decode` masked ids into bytes | the eos id (256) decoded to a NUL character instead of nothing |
-| Windows `System Idle Process` (pid 0) in the process table | topped the "busiest processes" list forever, at a nonsense 200% CPU |
-| `hub model --allow … --predict …` | the file patterns were dropped, so a 3.5 GB repo downloaded in full |
-| `tokenizer(...)` assumed a `BatchEncoding` | `AttributeError` on any tokenizer that returns a plain dict |
-| The GUI's next-token panel read a Tk variable from the worker thread | `RuntimeError: main thread is not in main loop` — the same trap as the earlier streaming bug |
-| `PROJECT_ROOT` was `parent.parent.parent` unconditionally | an installed copy wrote checkpoints and corpora into `site-packages` |
-| `/v1/completions` hardcoded `"logprobs": null` and `finish_reason: "length"` | clients could not score the model, and an eos stop was reported as a full-length one |
-| `data tokens` sent the default corpus to `fetch_corpus` | `ValueError: source kind 'wikipedia' is handled by the data service`, so the one command that only reads text could not inspect the default corpus at all |
-| A lab test called `lab.main(["--register-only"])` for real | it returns 1 when jupyterlab is absent, so all four CI jobs failed on a machine-dependent test while the local suite passed |
-| The optimiser section documented $\beta_2 = 0.999$ | the code uses `beta2 = 0.95`; the README described Adam's textbook default, not this project's |
-| The GUI text bar skipped a refresh when a count was still running | typing during a corpus count silently left the previous prompt's values on screen; now a stale result is dropped and the newer prompt is counted |
-| The token table was printed by the CLI, so nothing else could use it | the counting lived in the view; it is now `build_inventory` in the data service, which the GUI reads |
+What was wrong, and what it cost: [docs/bugs-found-and-fixed.md](docs/bugs-found-and-fixed.md).
 
 ---
 

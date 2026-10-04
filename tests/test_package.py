@@ -155,6 +155,71 @@ def test_ci_pipeline_keeps_its_gates():
     assert "::error" in (root / "tests" / "conftest.py").read_text(encoding="utf-8")
 
 
+def test_every_relative_link_in_the_documentation_resolves():
+    """The README was split into docs/ pages; a stale link is invisible in review.
+
+    A link to a heading that moved, or to a file that was renamed, renders as
+    plain text on GitHub and nobody notices until a reader clicks it.
+    """
+    import re
+    import unicodedata
+    from urllib.parse import unquote
+
+    root = Path(__file__).resolve().parent.parent
+    files = [root / "README.md", *sorted((root / "docs").glob("*.md"))]
+    assert len(files) > 1, "the reference pages are missing"
+
+    heading = re.compile(r"^(#{1,6}) +(.+?)\s*$")
+    fence = re.compile(r"^\s*(```|~~~)")
+    link = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+
+    def slug(text: str) -> str:
+        kept = [ch for ch in text
+                if ch == " " or ch in "-_"
+                or unicodedata.category(ch)[0] in "LNM"
+                or unicodedata.category(ch) == "So"]
+        return "".join(kept).strip().lower().replace(" ", "-")
+
+    def anchors(path: Path) -> set[str]:
+        found, fenced = set(), False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if fence.match(line):
+                fenced = not fenced
+            elif not fenced and (match := heading.match(line)):
+                found.add(slug(match.group(2)))
+        return found
+
+    broken = []
+    for path in files:
+        for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), 1):
+            for target in link.findall(line):
+                if target.startswith(("http://", "https://", "mailto:")):
+                    continue
+                where, _, fragment = target.partition("#")
+                destination = path if not where else (
+                    (path.parent / unquote(where)).resolve())
+                if not destination.exists():
+                    broken.append(f"{path.name}:{number} -> {target}")
+                elif fragment and unquote(fragment) not in anchors(destination):
+                    broken.append(f"{path.name}:{number} -> {target} "
+                                  "(no such heading)")
+    assert broken == [], f"documentation links that go nowhere: {broken}"
+
+
+def test_the_readme_is_the_front_door_and_the_reference_lives_in_docs():
+    """A README that grows past a thousand lines stops being read at all."""
+    root = Path(__file__).resolve().parent.parent
+    readme = (root / "README.md").read_text(encoding="utf-8").splitlines()
+    assert len(readme) <= 1000, f"the README is {len(readme)} lines"
+
+    docs = sorted(p.name for p in (root / "docs").glob("*.md"))
+    assert docs, "there are no reference pages"
+    text = (root / "README.md").read_text(encoding="utf-8")
+    for name in docs:
+        assert f"docs/{name}" in text, f"{name} is not linked from the README"
+
+
 def test_the_release_workflow_publishes_a_tag_and_nothing_else():
     """A release must be one tag push, and must not reach a package index.
 
