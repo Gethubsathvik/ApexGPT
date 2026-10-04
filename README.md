@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/pytorch-2.4%2B-ee4c2c.svg)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-338%20passing-success.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-375%20tests-success.svg)](tests)
 
 ---
 
@@ -48,7 +48,7 @@
 - Next-token prediction with AdamW, warmup + cosine decay, and gradient clipping
 - Samples with **temperature, top-k, top-p**, and repetition penalty
 - Four front ends over one implementation: **CLI**, **Tkinter GUI**, **Jupyter Lab**, **HTTP service**
-- **Automated tests** — 338 of them, covering causality, the KV cache, sampling, portability, corpus fetching, the live system scan, the next-token distribution, notebooks and the GUI
+- **Automated tests** — 375 of them, covering causality, the KV cache, sampling, portability, corpus fetching, the live system scan, the next-token distribution, notebooks and the GUI
 
 ---
 
@@ -107,7 +107,8 @@ Machine spec
 > Binds **http://127.0.0.1:8000**, finds the most recent real checkpoint by
 > itself, loads the tokenizer that checkpoint recorded, and serves the GUI-free
 > API: `/health`, `/generate`, `/predict`, `/stream`, `/v1/completions`,
-> `/v1/models`, and interactive docs at `/docs`. Spell the defaults out with
+> `/v1/models`, a landing page at `/`, and interactive docs at `/docs`. Spell
+> the defaults out with
 > `python -m apexgpt serve --host 127.0.0.1 --port 8000`; bind `0.0.0.0`
 > instead to let other machines on your network reach it. Full detail in
 > [🌐 HTTP API](#-http-api).
@@ -518,7 +519,7 @@ training loop are identical no matter where the text came from.
 | `openwebtext` | HF `Skylion007/openwebtext` | 12 GB | ~3B | Streamed and cut at `--target-mb` |
 | `hf:<repo_id>` | any Hugging Face dataset | — | — | Streamed, cut at `--target-mb` |
 | `kaggle:<slug>` | any Kaggle dataset | — | — | Needs `kaggle.json`; `kagglehub` or the `kaggle` CLI |
-| `local:<path>` | a file on disk | — | — | `.txt`, `.csv`, `.json`, `.jsonl`, `.parquet` |
+| `local:<path>` | a file on disk | — | — | `.txt`, `.md` are read where they lie; `.csv`, `.json`, `.jsonl`, `.parquet` are converted into `data/raw/local/<source>.txt` |
 | `url:<link>` | plain text over HTTP | — | — | Any text URL |
 
 ```bash
@@ -568,6 +569,13 @@ vocabulary*; the successor ranking answers *what comes next*.
 python -m apexgpt data tokens --tokenizer char --top 10
 python -m apexgpt data tokens --source local:my_notes.txt --limit 40
 ```
+
+> A one-off `--source` names a file to inspect, not a corpus to build: a
+> `.txt` or `.md` file is read where it lies, so two different files with the
+> same name can never answer with each other's tokens. Formats that need
+> converting are cached under a name derived from the whole path, for the same
+> reason. Build it for training only if you mean to: the command prints the
+> `data prepare` line that does that.
 
 ```
 ======================================================================
@@ -1548,6 +1556,7 @@ python -m apexgpt serve --host 0.0.0.0 --port 8000
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
+| `/` | GET | landing page: the endpoints below, and which model is loaded |
 | `/health` | GET | liveness + model metadata |
 | `/generate` | POST | one-shot generation, JSON in / JSON out, with logprobs |
 | `/predict` | POST | the ranked next-token distribution, nothing sampled |

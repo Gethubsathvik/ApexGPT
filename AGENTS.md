@@ -11,6 +11,10 @@ python -m pytest tests/test_x.py -q # one file
 python -m apexgpt <command> --help
 ```
 
+`.venv\Scripts\apexgpt.exe` and `.venv\Scripts\pytest.exe` work now; `python -m
+...` is still the documented form because it does not depend on the launchers
+above.
+
 `apexgpt` is a dispatcher: `env setup doctor data hub train generate gui lab serve`.
 `data` itself has `prepare` (default), `sources` and `tokens`.
 
@@ -50,6 +54,29 @@ in the code — do not "fix" them in the repository.
 
    then fetch `output.annotations_url`. The junit report is also uploaded as a
    run artifact, but downloading that needs a signed-in session.
+
+4. **The project folder has moved; the venv's console scripts have not.** `.venv`
+   was created at `D:\my projects\TinyLLM`. Every distlib launcher pip writes
+   (`pip.exe`, `pytest.exe`, `uvicorn.exe`, all of the `jupyter-*.exe`) embeds the
+   absolute path of the interpreter it spawns, so all 29 of them still point
+   there and fail with `Fatal error in the launcher: Unable to create process`.
+   `python -m ...` keeps working, which is why this looks like a broken install
+   rather than a moved one. Do **not** delete and recreate `.venv` — rule 1 makes
+   that impossible. Repair it instead: reinstall pip once to fix its own
+   launchers, then regenerate the rest from the installed entry points with
+   `pip._internal.operations.install.wheel.PipScriptMaker`, pointing it at
+   `sys.executable` and only rewriting exes that still embed the old path.
+   Afterwards `pip install -e . --no-deps --no-build-isolation` puts
+   `apexgpt.exe` back. Two leftovers of this: `jupyter.exe` itself is blocked by
+   the policy even when rewritten (use `jupyter-lab.exe`, or
+   `python -m jupyter`, which works), and a stale `tiny-agents.exe` survives the
+   rename to ApexGPT because its dist-info is long gone.
+
+5. **A blocked DLL can surface as an unrelated ImportError.** `import datasets`
+   fails inside `pyarrow.dataset` with "An Application Control policy has blocked
+   this file", which has nothing to do with datasets. `stream_hf_dataset` now
+   turns that into an actionable `RuntimeError`, and the one test that needs a
+   working pyarrow skips.
 
 ## House rules
 
