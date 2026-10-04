@@ -31,14 +31,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: read
-      checks: read          # to read the tests run of the tagged commit
+      contents: read      # checkout, and the tag
+      actions: read       # to read the tests workflow's run for this commit
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.ref_name }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -48,21 +48,18 @@ jobs:
           SHA: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          runs=$(gh api "repos/$REPOSITORY/commits/$SHA/check-runs?per_page=100" \
-                 --jq '.check_runs[] | select(.app.slug == "tests") | .name')
-          if [ -z "$runs" ]; then
-            echo "no tests run found for $SHA - push the commit to main first:" >&2
-            echo "https://github.com/$REPOSITORY/actions" >&2
-            exit 1
-          fi
-          echo "$runs" | while read -r name; do
-            [ -n "$name" ] && echo "tests job: $name"
-          done
-          failed=$(gh api "repos/$REPOSITORY/commits/$SHA/check-runs?per_page=100" \
-                   --jq '[.check_runs[] | select(.app.slug == "tests"
-                          and .conclusion != "success")] | length')
-          if [ "$failed" -ne 0 ]; then
-            echo "$failed tests job(s) did not pass for $SHA" >&2
+          # The tests *workflow* has to be asked for by name: every workflow in
+          # this repository reports under the same app slug, so filtering the
+          # commit's check runs would find this workflow's own jobs, which are
+          # in progress right now.
+          state=$(gh api \
+            "repos/$REPOSITORY/actions/workflows/tests.yml/runs?head_sha=$SHA&per_page=1" \
+            --jq 'if (.workflow_runs | length) == 0 then "none/-"
+                  else "\(.workflow_runs[0].status)/\(.workflow_runs[0].conclusion)" end')
+          echo "the tests workflow for $SHA: $state"
+          if [ "$state" != "completed/success" ]; then
+            echo "not publishing: push the commit to main and wait for the tests" >&2
+            echo "workflow to be green first - https://github.com/$REPOSITORY/actions" >&2
             exit 1
           fi
 

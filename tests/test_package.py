@@ -252,15 +252,22 @@ def test_the_release_workflow_publishes_a_tag_and_nothing_else():
     for name, job in jobs.items():
         assert job.get("timeout-minutes"), f"job {name} can hang forever"
 
-    # least privilege, per job: the build reads, only the publish writes
-    assert jobs["build"]["permissions"] == {"contents": "read", "checks": "read"}
+# least privilege, per job: the build reads, only the publish writes
+    assert jobs["build"]["permissions"] == {"contents": "read",
+                                           "actions": "read"}
     assert jobs["publish"]["permissions"] == {"contents": "write"}
     assert jobs["publish"]["needs"] == "build"
 
     build = yaml.safe_dump(jobs["build"])
     for gate in ("python -m build", "twine check", "pyproject.toml",
-                 "check-runs", "upload-artifact"):
+                 "workflows/tests.yml", "upload-artifact"):
         assert gate in build, f"the build job never does {gate}"
+
+    # the gate has to name the workflow, not the check runs: every workflow in
+    # this repository reports under one app slug, so filtering the commit's
+    # check runs finds this workflow's own still-running jobs and the release
+    # refuses itself
+    assert "check-runs" not in build
 
     publish = yaml.safe_dump(jobs["publish"])
     assert "download-artifact" in publish
