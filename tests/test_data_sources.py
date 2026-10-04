@@ -195,6 +195,12 @@ def test_fetch_corpus_rejects_a_kind_the_service_owns(tmp_path):
 
 def test_hf_stream_failure_names_the_dataset(tmp_path):
     """A bad repo id must say so, not fail deep inside the reader."""
+    try:
+        import datasets                                # noqa: F401
+    except Exception as exc:
+        # An application-control policy can block a pyarrow DLL, which surfaces
+        # as an ImportError from inside datasets. That is the machine, not the code.
+        pytest.skip(f"datasets/pyarrow unusable here: {type(exc).__name__}: {exc}")
     corpus = Corpus("x", "x", "hf-stream", "apexgpt/definitely-not-a-dataset")
     with pytest.raises(RuntimeError) as excinfo:
         sources.stream_hf_dataset(corpus, tmp_path / "out.txt", target_mb=1,
@@ -202,6 +208,15 @@ def test_hf_stream_failure_names_the_dataset(tmp_path):
     message = str(excinfo.value)
     assert "definitely-not-a-dataset" in message
     assert "--source local" in message
+
+
+def test_hf_stream_without_datasets_explains_the_install(tmp_path, monkeypatch):
+    """A blocked or missing pyarrow must not surface as an ImportError traceback."""
+    monkeypatch.setitem(sys.modules, "datasets", None)
+    corpus = Corpus("x", "x", "hf-stream", "owner/name")
+    with pytest.raises(RuntimeError, match="pip install datasets pyarrow"):
+        sources.stream_hf_dataset(corpus, tmp_path / "out.txt", target_mb=1,
+                                  progress=lambda *a: None)
 
 
 def test_kaggle_without_a_client_explains_what_to_install(tmp_path, monkeypatch):

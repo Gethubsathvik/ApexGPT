@@ -288,8 +288,19 @@ def subprocess_call(cmd: list[str]) -> int:
 def stream_hf_dataset(corpus: Corpus, dest: Path, target_mb: int = 1000,
                       progress=print) -> Path:
     """Stream a Hugging Face dataset to text, stopping at ``--target-mb``."""
-    from datasets import load_dataset
     from tqdm import tqdm
+
+    try:
+        from datasets import load_dataset
+    except ImportError as exc:
+        # A missing or blocked pyarrow surfaces here as an ImportError, and a
+        # traceback from deep inside the reader says nothing actionable.
+        raise RuntimeError(
+            "streaming a Hugging Face corpus needs the datasets package and a "
+            f"working pyarrow ({exc}). Install them with\n"
+            "  pip install datasets pyarrow\n"
+            "or pass --source local:<path> instead."
+        ) from exc
 
     kwargs = {"path": corpus.locator, "split": corpus.split, "streaming": True}
     if corpus.config:
