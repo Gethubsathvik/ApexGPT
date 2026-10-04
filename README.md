@@ -966,7 +966,7 @@ What was wrong, and what it cost: [docs/bugs-found-and-fixed.md](docs/bugs-found
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](MIT).
 
 ## 🔗 Links
 
